@@ -35,6 +35,13 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
+        // TopAppBar (Material3) trong ban compose-bom dang dung van con danh dau @ExperimentalMaterial3Api.
+        // Opt-in o muc compiler de khong phai them @OptIn thu cong o tung file, tranh lap loi nay ve sau
+        // khi dung them cac API thu nghiem khac cua Material3 (vi du ModalBottomSheet, ExposedDropdownMenuBox...).
+        freeCompilerArgs += listOf(
+            "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api",
+            "-opt-in=androidx.compose.material.ExperimentalMaterialApi",
+        )
     }
 
     buildFeatures {
