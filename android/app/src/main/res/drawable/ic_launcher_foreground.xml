@@ -1,0 +1,22 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Biểu tượng ScanX: tờ giấy tài liệu + vạch quét, vẽ trực tiếp bằng vector, không dùng ảnh -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M34,24 H66 L78,36 V84 H34 Z" />
+    <path
+        android:fillColor="#DCE8FF"
+        android:pathData="M66,24 L78,36 H66 Z" />
+    <path
+        android:fillColor="#2F6FED"
+        android:pathData="M42,50 H70 V56 H42 Z" />
+    <path
+        android:fillColor="#2F6FED"
+        android:pathData="M42,62 H70 V68 H42 Z" />
+    <path
+        android:fillColor="#2F6FED"
+        android:pathData="M42,74 H58 V80 H42 Z" />
+</vector>

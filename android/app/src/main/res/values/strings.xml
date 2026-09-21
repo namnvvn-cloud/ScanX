@@ -1,0 +1,17 @@
+<resources>
+    <string name="app_name">ScanX</string>
+    <string name="home_title">ScanX</string>
+    <string name="scan_button">Quét tài liệu</string>
+    <string name="empty_state">Chưa có tài liệu nào.\nNhấn nút bên dưới để quét trang đầu tiên.</string>
+    <string name="detail_ocr_title">Văn bản nhận dạng (OCR)</string>
+    <string name="detail_no_text">Không nhận dạng được văn bản trong tài liệu này.</string>
+    <string name="action_share">Chia sẻ</string>
+    <string name="action_delete">Xoá</string>
+    <string name="action_delete_confirm_title">Xoá tài liệu?</string>
+    <string name="action_delete_confirm_body">Tài liệu sẽ bị xoá khỏi máy và không thể khôi phục.</string>
+    <string name="action_cancel">Huỷ</string>
+    <string name="pages_count">%1$d trang</string>
+    <string name="scanning_in_progress">Đang xử lý OCR…</string>
+    <string name="camera_permission_rationale">ScanX cần quyền Camera để quét tài liệu.</string>
+    <string name="camera_permission_denied">Bạn cần cấp quyền Camera trong Cài đặt để dùng tính năng quét.</string>
+</resources>

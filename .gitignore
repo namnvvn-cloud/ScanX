@@ -1,0 +1,26 @@
+# Android / Gradle
+android/*.iml
+android/.gradle/
+android/local.properties
+android/.idea/
+android/build/
+android/app/build/
+android/captures/
+android/.externalNativeBuild/
+android/.cxx/
+android/*.apk
+!android/**/sample-*.apk
+
+# macOS / OS junk
+.DS_Store
+Thumbs.db
+
+# Backend (Node) - thêm khi tạo backend/
+backend/node_modules/
+backend/dist/
+backend/.env
+
+# Web quản lý (Next.js) - thêm khi tạo web-admin/
+web-admin/node_modules/
+web-admin/.next/
+web-admin/.env*.local

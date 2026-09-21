@@ -1,0 +1,10 @@
+<resources>
+    <!-- Bảng màu ScanX: xanh dương làm màu thương hiệu chính, hài hoà, tương phản tốt cho UI tài liệu -->
+    <color name="scanx_primary">#2F6FED</color>
+    <color name="scanx_primary_dark">#1B4FC4</color>
+    <color name="scanx_on_primary">#FFFFFF</color>
+    <color name="scanx_background_light">#F7F8FA</color>
+    <color name="scanx_background_dark">#101317</color>
+    <color name="scanx_surface_light">#FFFFFF</color>
+    <color name="scanx_surface_dark">#1B1F24</color>
+</resources>
