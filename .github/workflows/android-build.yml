@@ -23,8 +23,15 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      # Tat cache Gradle: moi lan push cache-key doi theo commit nen cache moi lien tuc
+      # duoc tao ma khong tai su dung, lam day nhanh han muc luu tru Actions mien phi
+      # (500MB, dung chung artifacts + caches) -> khien buoc upload APK bi chan du build
+      # van thanh cong. Tat han de khong ton dung luong; danh doi la moi lan build tai lai
+      # dependency (~2-3 phut), chap nhan duoc o giai doan free-tier hien tai.
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-disabled: true
 
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew || true
@@ -44,3 +51,4 @@ jobs:
         with:
           name: scanx-debug-apk
           path: android/app/build/outputs/apk/debug/*.apk
+          retention-days: 5
