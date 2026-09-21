@@ -8,6 +8,9 @@ on:
       - ".github/workflows/android-build.yml"
   workflow_dispatch: {}
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -46,9 +49,25 @@ jobs:
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --no-daemon
 
-      - name: Upload APK artifact
+      # Actions Artifact storage (500MB free-tier, dung chung ca tai khoan) bi chan va chi
+      # duoc GitHub tinh lai sau 6-12 tieng du da don cache -> khong dung upload-artifact
+      # nua. Thay bang dinh file APK vao 1 GitHub Release: dung luong Release KHONG tinh
+      # vao quota Actions Storage, tai APK on dinh ngay ca khi quota Actions dang day.
+      - name: Upload APK artifact (best-effort, co the bi chan boi quota Actions Storage)
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: scanx-debug-apk
           path: android/app/build/outputs/apk/debug/*.apk
           retention-days: 5
+
+      - name: Publish APK to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: debug-build-${{ github.run_number }}
+          name: "ScanX debug build #${{ github.run_number }} (${{ github.sha }})"
+          body: |
+            APK debug tu dong build tu commit ${{ github.sha }}.
+            Tai file .apk ben duoi, copy vao dien thoai Android de cai (bat "Cai tu nguon khong xac dinh").
+          prerelease: true
+          files: android/app/build/outputs/apk/debug/*.apk
