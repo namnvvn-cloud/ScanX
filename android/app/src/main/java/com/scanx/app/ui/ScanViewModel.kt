@@ -9,11 +9,14 @@ import androidx.lifecycle.viewModelScope
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import com.scanx.app.convert.ExportFormat
+import com.scanx.app.convert.ExportManager
 import com.scanx.app.data.AppPreferences
 import com.scanx.app.data.DocumentMeta
 import com.scanx.app.data.DocumentRepository
 import com.scanx.app.data.FolderMeta
 import com.scanx.app.data.SortOrder
+import com.scanx.app.data.TextLayerLine
 import com.scanx.app.data.ViewMode
 import com.scanx.app.util.awaitTask
 import kotlinx.coroutines.Dispatchers
@@ -25,6 +28,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.util.Locale
 
 class ScanViewModel(application: Application) : AndroidViewModel(application) {
@@ -63,6 +67,48 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
+
+    private val exporter = ExportManager(application)
+
+    /** Trạng thái đang xuất/chuyển đổi file (null = rảnh) — UI hiển thị lớp phủ tiến độ. */
+    private val _exportStatus = MutableStateFlow<String?>(null)
+    val exportStatus: StateFlow<String?> = _exportStatus.asStateFlow()
+
+    /** Xuất tài liệu đã scan sang [format]; [onDone] chạy trên main thread với các file kết quả. */
+    fun exportDocument(id: String, format: ExportFormat, onDone: (List<File>) -> Unit) {
+        val doc = repository.getDocument(id) ?: return
+        if (_exportStatus.value != null) return
+        viewModelScope.launch {
+            _exportStatus.value = "Đang xuất ${format.label}…"
+            try {
+                val files = exporter.exportPdf(repository.getPdfFile(id), doc.title, doc.ocrText, format) { i, n ->
+                    _exportStatus.value = if (format == ExportFormat.JPG) "Đang xuất ảnh trang $i/$n…" else "AI đang phân tích bố cục trang $i/$n…"
+                }
+                onDone(files)
+            } catch (e: Throwable) {
+                _errorMessage.value = "Xuất file thất bại: ${e.message}"
+            } finally {
+                _exportStatus.value = null
+            }
+        }
+    }
+
+    /** Công cụ chuyển đổi: PDF/ảnh import → Word/Excel/PowerPoint giữ bố cục. */
+    fun convertFiles(uris: List<Uri>, format: ExportFormat, onDone: (File) -> Unit) {
+        if (uris.isEmpty() || _exportStatus.value != null) return
+        viewModelScope.launch {
+            _exportStatus.value = "Đang chuyển đổi sang ${format.label}…"
+            try {
+                val title = "ScanX chuyển đổi " + java.text.SimpleDateFormat("dd-MM-yyyy HHmm", Locale("vi", "VN")).format(java.util.Date())
+                val file = exporter.convertImported(uris, title, format) { i, n -> _exportStatus.value = "AI đang phân tích bố cục trang $i/$n…" }
+                onDone(file)
+            } catch (e: Throwable) {
+                _errorMessage.value = "Chuyển đổi thất bại: ${e.message}"
+            } finally {
+                _exportStatus.value = null
+            }
+        }
+    }
 
     init {
         viewModelScope.launch(Dispatchers.IO) {
@@ -130,13 +176,13 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isProcessing.value = true
             try {
-                val ocrText = if (prefs.autoOcrEnabled) {
+                val ocr = if (prefs.autoOcrEnabled) {
                     withContext(Dispatchers.Default) { recognizeTextFromBitmaps(pages) }
                 } else {
-                    ""
+                    OcrResult("", emptyList())
                 }
                 withContext(Dispatchers.IO) {
-                    repository.saveDocument(pages = pages, ocrText = ocrText, folderId = _currentFolderId.value)
+                    repository.saveDocument(pages = pages, ocrText = ocr.text, folderId = _currentFolderId.value, textLayers = ocr.layers)
                 }
                 pages.forEach { if (!it.isRecycled) it.recycle() }
                 refresh()
@@ -166,13 +212,13 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                     _errorMessage.value = "Không đọc được ảnh đã chọn"
                     return@launch
                 }
-                val ocrText = if (prefs.autoOcrEnabled) {
+                val ocr = if (prefs.autoOcrEnabled) {
                     withContext(Dispatchers.Default) { recognizeTextFromBitmaps(bitmaps) }
                 } else {
-                    ""
+                    OcrResult("", emptyList())
                 }
                 withContext(Dispatchers.IO) {
-                    repository.saveDocument(pages = bitmaps, ocrText = ocrText, folderId = _currentFolderId.value)
+                    repository.saveDocument(pages = bitmaps, ocrText = ocr.text, folderId = _currentFolderId.value, textLayers = ocr.layers)
                 }
                 bitmaps.forEach { it.recycle() }
                 refresh()
@@ -184,9 +230,14 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private suspend fun recognizeTextFromBitmaps(pages: List<Bitmap>): String {
+    private class OcrResult(val text: String, val layers: List<List<TextLayerLine>>)
+
+    /** OCR từng trang: vừa lấy văn bản (tìm kiếm, xem nhanh) vừa lấy toạ độ từng dòng (lớp chữ ẩn trong PDF). */
+    private suspend fun recognizeTextFromBitmaps(pages: List<Bitmap>): OcrResult {
         val builder = StringBuilder()
+        val layers = ArrayList<List<TextLayerLine>>()
         for ((index, bitmap) in pages.withIndex()) {
+            val pageLines = ArrayList<TextLayerLine>()
             try {
                 val image = InputImage.fromBitmap(bitmap, 0)
                 val result = recognizer.process(image).awaitTask()
@@ -196,11 +247,16 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     builder.append(result.text).append("\n\n")
                 }
+                for (block in result.textBlocks) for (line in block.lines) {
+                    val r = line.boundingBox ?: continue
+                    pageLines.add(TextLayerLine(line.text, r.left.toFloat(), r.top.toFloat(), r.right.toFloat(), r.bottom.toFloat()))
+                }
             } catch (e: Exception) {
                 // Bỏ qua lỗi OCR của 1 trang, không chặn việc lưu cả tài liệu.
             }
+            layers.add(pageLines)
         }
-        return builder.toString().trim()
+        return OcrResult(builder.toString().trim(), layers)
     }
 
     fun moveToTrash(id: String) {

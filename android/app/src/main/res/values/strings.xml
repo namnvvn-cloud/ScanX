@@ -97,7 +97,7 @@
     <string name="scanning_capture_mode_auto">Tự động</string>
     <string name="scanning_capture_mode_manual">Thủ công</string>
     <string name="scanning_auto_sensitivity">Độ nhạy chụp tự động</string>
-    <string name="scanning_auto_sensitivity_desc">Thời gian giữ yên tài liệu trước khi AI tự chụp (mỗi nấc 60 ms) — thấp hơn = chụp nhanh hơn</string>
+    <string name="scanning_auto_sensitivity_desc">Thời gian giữ yên tài liệu trước khi AI tự chụp (mỗi nấc 40 ms) — thấp hơn = chụp nhanh hơn</string>
     <string name="scanning_auto_sensitivity_fast">Nhanh</string>
     <string name="scanning_auto_sensitivity_slow">Chuẩn</string>
     <string name="scanning_flash_default">Bật đèn flash mặc định</string>
@@ -123,4 +123,27 @@
 
     <!-- Rename document -->
     <string name="rename_document_title">Đổi tên tài liệu</string>
+
+    <!-- Xem chi tiết / Xuất file / Chuyển đổi -->
+    <string name="detail_tab_pdf">Bản PDF</string>
+    <string name="detail_tab_text">Văn bản (OCR)</string>
+    <string name="detail_pdf_error">Không mở được file PDF của tài liệu này.</string>
+    <string name="export_title">Xuất / Lưu file</string>
+    <string name="export_save">Lưu vào máy</string>
+    <string name="export_saved">Đã lưu %1$s</string>
+    <string name="export_save_failed">Lưu thất bại: %1$s</string>
+    <string name="export_saved_gallery">Đã lưu %1$d ảnh vào Thư viện ảnh (Pictures/ScanX)</string>
+    <string name="export_desc_pdf">Giữ nguyên bản scan, tìm kiếm &amp; copy chữ được</string>
+    <string name="export_desc_docx">Word sửa được, giữ bố cục: bảng, header 2 cột, căn lề, cỡ chữ</string>
+    <string name="export_desc_xlsx">Bảng biểu đúng ô, ô gộp, viền; số liệu tính toán được</string>
+    <string name="export_desc_pptx">Mỗi trang 1 slide, chữ &amp; bảng sửa được đúng vị trí</string>
+    <string name="export_desc_jpg">Ảnh từng trang chất lượng cao</string>
+    <string name="export_desc_txt">Chỉ văn bản thuần</string>
+    <string name="export_cloud_ai">Chuyển đổi nâng cao (AI Cloud)</string>
+    <string name="export_cloud_ai_desc">Bố cục phức tạp, bảng không kẻ viền — xử lý trên máy chủ AI</string>
+    <string name="tools_convert_section">Chuyển đổi file</string>
+    <string name="tools_convert_office">PDF/Ảnh → Office</string>
+    <string name="tools_convert_cloud">AI Cloud</string>
+    <string name="convert_choose_format">Chuyển đổi sang định dạng</string>
+    <string name="convert_done_title">Chuyển đổi xong</string>
 </resources>

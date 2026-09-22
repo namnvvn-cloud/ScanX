@@ -29,6 +29,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
@@ -126,6 +128,7 @@ fun HomeScreen(
     onImportFilesClick: () -> Unit,
     onCameraClick: () -> Unit,
     onComingSoon: () -> Unit,
+    onConvertFiles: () -> Unit = {},
 ) {
     var selectMode by rememberSaveable { mutableStateOf(false) }
     var selectedIds by rememberSaveable { mutableStateOf(setOf<String>()) }
@@ -351,6 +354,7 @@ fun HomeScreen(
         ToolsBottomSheet(
             onDismiss = { showToolsSheet = false },
             onDocumentClick = { showToolsSheet = false; onCameraClick() },
+            onConvertClick = { showToolsSheet = false; onConvertFiles() },
             onComingSoon = { showToolsSheet = false; onComingSoon() },
         )
     }
@@ -685,6 +689,7 @@ private fun HomeBottomBar(
 private fun ToolsBottomSheet(
     onDismiss: () -> Unit,
     onDocumentClick: () -> Unit,
+    onConvertClick: () -> Unit,
     onComingSoon: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState()
@@ -703,6 +708,20 @@ private fun ToolsBottomSheet(
                 ToolItem(Icons.Filled.TextFields, stringResource(R.string.tools_text), locked = true, onClick = onComingSoon)
                 ToolItem(Icons.Filled.MenuBook, stringResource(R.string.tools_book), locked = true, onClick = onComingSoon)
                 ToolItem(Icons.Filled.QrCodeScanner, stringResource(R.string.tools_qr_code), locked = true, onClick = onComingSoon)
+            }
+            Text(
+                stringResource(R.string.tools_convert_section),
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 8.dp),
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+            ) {
+                ToolItem(Icons.Filled.SwapHoriz, stringResource(R.string.tools_convert_office), locked = false, onClick = onConvertClick)
+                ToolItem(Icons.Filled.AutoAwesome, stringResource(R.string.tools_convert_cloud), locked = true, onClick = onComingSoon)
+                Spacer(Modifier.width(76.dp))
+                Spacer(Modifier.width(76.dp))
             }
         }
     }

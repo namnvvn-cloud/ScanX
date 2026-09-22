@@ -45,12 +45,18 @@ class DocumentRepository(private val context: Context) {
      * Ghép các trang đã chụp (đã làm phẳng/tăng nét) thành 1 tài liệu mới: tạo PDF, lưu thumbnail,
      * ghi metadata (đã có sẵn text OCR nhận dạng trước đó).
      */
-    fun saveDocument(pages: List<Bitmap>, ocrText: String, folderId: String? = null, title: String? = null): DocumentMeta {
+    fun saveDocument(
+        pages: List<Bitmap>,
+        ocrText: String,
+        folderId: String? = null,
+        title: String? = null,
+        textLayers: List<List<TextLayerLine>> = emptyList(),
+    ): DocumentMeta {
         require(pages.isNotEmpty()) { "Không có trang nào để lưu" }
         val id = UUID.randomUUID().toString()
         val folder = File(rootDir, id).apply { mkdirs() }
 
-        PdfBuilder.buildPdf(pages, File(folder, "document.pdf"))
+        PdfBuilder.buildPdf(pages, File(folder, "document.pdf"), textLayers)
         PdfBuilder.saveThumbnail(pages.first(), getThumbnailFile(id))
 
         val createdAt = System.currentTimeMillis()

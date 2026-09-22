@@ -156,7 +156,9 @@ fun ScanCameraScreen(
                 .build()
                 .also { it.setAnalyzer(analysisExecutor) { proxy -> viewModel.onFrameAnalyzed(proxy) } }
             val imageCapture = ImageCapture.Builder()
-                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                // Zero Shutter Lag: CameraX giữ sẵn bộ đệm khung hình, lấy đúng khung tại thời điểm bấm
+                // → gần như không trễ. Máy không hỗ trợ thì CameraX tự lùi về MINIMIZE_LATENCY.
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_ZERO_SHUTTER_LAG)
                 .setResolutionSelector(
                     ResolutionSelector.Builder()
                         .setAspectRatioStrategy(ratio43)

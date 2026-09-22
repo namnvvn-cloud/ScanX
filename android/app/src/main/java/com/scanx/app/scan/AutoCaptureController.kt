@@ -52,12 +52,15 @@ fun maxCornerDistance(a: DetectedQuad, b: DetectedQuad): Float {
  *    → Lật trang là tự chụp trang mới, không cần bấm, và không bao giờ chụp trùng 1 trang 2 lần.
  */
 class AutoCaptureController(
-    var holdMillis: Long = 400L,
+    var holdMillis: Long = 240L,
     private val minConfidence: Float = 0.55f,
-    private val stillTolerance: Float = 0.02f,
+    private val stillTolerance: Float = 0.025f,
     private val newPageSignatureDistance: Float = 0.07f,
     private val disruptionDistance: Float = 0.08f,
-    private val minIntervalMillis: Long = 700L,
+    private val minIntervalMillis: Long = 400L,
+    /** Ảnh rất nét (AI tin cậy ≥ 0,8) → chỉ cần giữ yên 60% thời gian cấu hình. */
+    private val highConfidence: Float = 0.8f,
+    private val highConfidenceHoldFactor: Float = 0.6f,
 ) {
     data class Decision(val progress: Float, val shouldCapture: Boolean, val waitingForNewPage: Boolean)
 
@@ -99,7 +102,12 @@ class AutoCaptureController(
             return Decision(0f, false, false)
         }
 
-        val progress = ((nowMillis - holdStart).toFloat() / holdMillis).coerceIn(0f, 1f)
+        val effectiveHold = if (quad.confidence >= highConfidence) {
+            (holdMillis * highConfidenceHoldFactor).toLong()
+        } else {
+            holdMillis
+        }.coerceAtLeast(80L)
+        val progress = ((nowMillis - holdStart).toFloat() / effectiveHold).coerceIn(0f, 1f)
         if (progress >= 1f && nowMillis - lastCaptureAt >= minIntervalMillis) {
             markCaptured(quad, signature, nowMillis)
             return Decision(1f, true, false)

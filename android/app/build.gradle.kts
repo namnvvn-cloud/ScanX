@@ -12,8 +12,10 @@ android {
         applicationId = "com.scanx.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        // Số build CI tự tăng → mỗi APK mới có versionCode lớn hơn bản đang cài, Android cho cài đè.
+        val ciBuildNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+        versionCode = ciBuildNumber
+        versionName = "0.2.$ciBuildNumber"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -24,8 +26,21 @@ android {
         }
     }
 
+    // Khoá ký debug CỐ ĐỊNH lưu trong repo. Trước đây máy build GitHub tự sinh khoá ngẫu nhiên mỗi
+    // lần → APK sau khác chữ ký APK trước → Android báo "xung đột gói", buộc gỡ app mới cài được.
+    // (Chỉ dùng cho bản debug/test; bản phát hành Google Play sẽ dùng khoá release riêng, bảo mật.)
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("scanx-debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         debug {
+            signingConfig = signingConfigs.getByName("debug")
             isMinifyEnabled = false
             applicationIdSuffix = ".debug"
         }

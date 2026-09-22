@@ -251,8 +251,8 @@ class ScanCameraViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     companion object {
-        /** Mỗi nấc độ nhạy trong Cài đặt = 60 ms giữ yên (mặc định 6 nấc = 0,36 s). */
-        const val HOLD_MS_PER_STEP = 60L
+        /** Mỗi nấc độ nhạy trong Cài đặt = 40 ms giữ yên (mặc định 6 nấc = 0,24 s; ảnh rất nét chỉ ~0,15 s). */
+        const val HOLD_MS_PER_STEP = 40L
         private const val CAPTURE_MAX_SIDE = 2400
         private const val PAGE_MAX_SIDE = 2000
         private const val REFINE_MIN_CONFIDENCE = 0.5f

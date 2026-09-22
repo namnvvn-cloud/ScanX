@@ -12,13 +12,21 @@ import java.io.FileOutputStream
  * Dùng android.graphics.pdf.PdfDocument có sẵn trong Android SDK — không cần thêm thư viện PDF
  * ngoài (giảm rủi ro version, phù hợp triết lý của project: hạn chế dependency khi có thể).
  */
+/** 1 dòng chữ OCR (toạ độ pixel trên ảnh trang) dùng làm lớp chữ ẩn cho PDF tìm kiếm được. */
+data class TextLayerLine(val text: String, val left: Float, val top: Float, val right: Float, val bottom: Float)
+
 object PdfBuilder {
 
     /** 72 DPI theo chuẩn PDF point; scale kích thước ảnh (px, thường ~200-300 DPI) về point tương ứng. */
     private const val PDF_DPI = 170.0
     private const val POINTS_PER_INCH = 72.0
 
-    fun buildPdf(pages: List<Bitmap>, outFile: File) {
+    /**
+     * [textLayers] (tuỳ chọn, cùng thứ tự với [pages]): vẽ chữ OCR đúng vị trí NẰM DƯỚI ảnh trang → PDF
+     * nhìn y hệt bản scan nhưng tìm kiếm / bôi đen copy chữ được (giống Adobe Scan). Vẽ dưới ảnh vì
+     * Skia bỏ qua lệnh vẽ chữ trong suốt (alpha 0), còn chữ bị ảnh che vẫn được ghi vào PDF.
+     */
+    fun buildPdf(pages: List<Bitmap>, outFile: File, textLayers: List<List<TextLayerLine>> = emptyList()) {
         require(pages.isNotEmpty()) { "Không có trang nào để tạo PDF" }
         val document = PdfDocument()
         try {
@@ -30,9 +38,10 @@ object PdfBuilder {
                 // Vẽ ảnh gốc với ma trận co về kích thước trang (point) thay vì co ảnh trước khi vẽ:
                 // PdfDocument nhúng nguyên ảnh độ phân giải cao → PDF nét khi phóng to/in ấn
                 // (bản cũ co ảnh xuống ~72 DPI nên chữ bị nhoè).
-                val matrix = Matrix().apply {
-                    setScale(widthPt.toFloat() / bitmap.width, heightPt.toFloat() / bitmap.height)
-                }
+                val sx = widthPt.toFloat() / bitmap.width
+                val sy = heightPt.toFloat() / bitmap.height
+                textLayers.getOrNull(index)?.let { lines -> drawTextLayer(page.canvas, lines, sx, sy) }
+                val matrix = Matrix().apply { setScale(sx, sy) }
                 page.canvas.drawBitmap(bitmap, matrix, Paint(Paint.FILTER_BITMAP_FLAG))
                 document.finishPage(page)
             }
@@ -40,6 +49,22 @@ object PdfBuilder {
             FileOutputStream(outFile).use { out -> document.writeTo(out) }
         } finally {
             document.close()
+        }
+    }
+
+    private fun drawTextLayer(canvas: android.graphics.Canvas, lines: List<TextLayerLine>, sx: Float, sy: Float) {
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.BLACK }
+        for (l in lines) {
+            val text = l.text.trim()
+            if (text.isEmpty()) continue
+            val h = (l.bottom - l.top) * sy
+            val w = (l.right - l.left) * sx
+            if (h <= 0f || w <= 0f) continue
+            paint.textScaleX = 1f
+            paint.textSize = h * 0.8f
+            val measured = paint.measureText(text)
+            if (measured > 0f) paint.textScaleX = (w / measured).coerceIn(0.2f, 5f)
+            canvas.drawText(text, l.left * sx, l.bottom * sy - h * 0.2f, paint)
         }
     }
 
