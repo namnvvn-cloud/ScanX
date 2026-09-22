@@ -1,7 +1,6 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
@@ -16,6 +15,12 @@ android {
         versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // OpenCV AAR đóng gói native lib cho mọi ABI (~110MB). Giới hạn còn 2 ABI phổ biến nhất
+        // trên điện thoại thật (bỏ x86/x86_64 chỉ dùng cho emulator) để giảm đáng kể kích thước APK.
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+        }
     }
 
     buildTypes {
@@ -35,17 +40,22 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
-        // TopAppBar (Material3) trong ban compose-bom dang dung van con danh dau @ExperimentalMaterial3Api.
-        // Opt-in o muc compiler de khong phai them @OptIn thu cong o tung file, tranh lap loi nay ve sau
-        // khi dung them cac API thu nghiem khac cua Material3 (vi du ModalBottomSheet, ExposedDropdownMenuBox...).
+        // TopAppBar (Material3) trong bản compose-bom đang dùng vẫn còn đánh dấu @ExperimentalMaterial3Api.
+        // Opt-in ở mức compiler để không phải thêm @OptIn thủ công ở từng file, tránh lặp lỗi này về sau
+        // khi dùng thêm các API thử nghiệm khác của Material3 (ví dụ ModalBottomSheet, ExposedDropdownMenuBox...).
         freeCompilerArgs += listOf(
             "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api",
             "-opt-in=androidx.compose.material.ExperimentalMaterialApi",
+            "-opt-in=androidx.compose.foundation.ExperimentalFoundationApi",
         )
     }
 
     buildFeatures {
         compose = true
+        buildConfig = true
+    }
+    composeOptions {
+        kotlinCompilerExtensionVersion = "1.5.14"
     }
 
     packaging {
@@ -72,12 +82,24 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.4")
 
-    // Google ML Kit Document Scanner: xử lý chụp, phát hiện biên, crop, filter, xuất PDF/JPEG - giống Scanner Pro/CamScanner
-    implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0-beta1")
     // OCR on-device, hỗ trợ tiếng Việt (Latin script)
     implementation("com.google.mlkit:text-recognition:16.0.1")
 
     implementation("androidx.core:core-splashscreen:1.0.1")
+
+    // CameraX: camera tự viết (preview + phân tích từng khung hình) thay cho UI camera có sẵn
+    // của Google ML Kit Document Scanner — cần để tự kiểm soát tốc độ/độ chính xác tự động chụp.
+    val cameraXVersion = "1.4.0"
+    implementation("androidx.camera:camera-core:$cameraXVersion")
+    implementation("androidx.camera:camera-camera2:$cameraXVersion")
+    implementation("androidx.camera:camera-lifecycle:$cameraXVersion")
+    implementation("androidx.camera:camera-view:$cameraXVersion")
+
+    // OpenCV (bản chính thức publish thẳng lên Maven Central từ 4.9.0, không cần app OpenCV Manager
+    // riêng): dùng để phát hiện 4 góc tài liệu real-time trên từng khung hình camera (Canny edge +
+    // findContours) và làm phẳng ảnh nghiêng (perspective transform) sau khi chụp — thuật toán cùng
+    // họ với Scanner Pro/CamScanner/Adobe Scan dùng, thay vì phụ thuộc hộp đen của Google.
+    implementation("org.opencv:opencv:4.11.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

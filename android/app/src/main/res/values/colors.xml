@@ -7,4 +7,7 @@
     <color name="scanx_background_dark">#101317</color>
     <color name="scanx_surface_light">#FFFFFF</color>
     <color name="scanx_surface_dark">#1B1F24</color>
+    <!-- Màu cam nhấn cho nút chụp camera / hành động chính nổi bật -->
+    <color name="scanx_accent_orange">#FF7A1A</color>
+    <color name="scanx_locked_gray">#9AA1AB</color>
 </resources>

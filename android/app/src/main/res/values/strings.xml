@@ -1,17 +1,126 @@
 <resources>
     <string name="app_name">ScanX</string>
-    <string name="home_title">ScanX</string>
+    <string name="home_title">My Scans</string>
     <string name="scan_button">Quét tài liệu</string>
-    <string name="empty_state">Chưa có tài liệu nào.\nNhấn nút bên dưới để quét trang đầu tiên.</string>
+    <string name="empty_state">Chưa có tài liệu nào.\nNhấn nút Camera bên dưới để quét trang đầu tiên.</string>
+    <string name="empty_folder">Thư mục này chưa có tài liệu nào.</string>
+    <string name="empty_search">Không tìm thấy kết quả phù hợp.</string>
     <string name="detail_ocr_title">Văn bản nhận dạng (OCR)</string>
     <string name="detail_no_text">Không nhận dạng được văn bản trong tài liệu này.</string>
     <string name="action_share">Chia sẻ</string>
     <string name="action_delete">Xoá</string>
-    <string name="action_delete_confirm_title">Xoá tài liệu?</string>
-    <string name="action_delete_confirm_body">Tài liệu sẽ bị xoá khỏi máy và không thể khôi phục.</string>
+    <string name="action_delete_confirm_title">Chuyển vào Thùng rác?</string>
+    <string name="action_delete_confirm_body">Tài liệu sẽ được chuyển vào Thùng rác và tự xoá vĩnh viễn sau 30 ngày.</string>
     <string name="action_cancel">Huỷ</string>
+    <string name="action_ok">Đồng ý</string>
     <string name="pages_count">%1$d trang</string>
     <string name="scanning_in_progress">Đang xử lý OCR…</string>
     <string name="camera_permission_rationale">ScanX cần quyền Camera để quét tài liệu.</string>
     <string name="camera_permission_denied">Bạn cần cấp quyền Camera trong Cài đặt để dùng tính năng quét.</string>
+
+    <!-- Home top bar / search / menu "..." -->
+    <string name="home_search_hint">Tìm kiếm tài liệu…</string>
+    <string name="home_smart_filters">Bộ lọc thông minh</string>
+    <string name="cd_settings">Cài đặt</string>
+    <string name="cd_more_menu">Menu mở rộng</string>
+    <string name="menu_select">Chọn</string>
+    <string name="menu_new_folder">Thư mục mới</string>
+    <string name="menu_import_files">Nhập tệp</string>
+    <string name="menu_expense_report">Báo cáo chi phí</string>
+    <string name="menu_view_grid">Xem dạng lưới</string>
+    <string name="menu_view_list">Xem dạng danh sách</string>
+    <string name="menu_sort_by">Sắp xếp theo</string>
+    <string name="menu_priority_support">Hỗ trợ ưu tiên</string>
+    <string name="menu_trash_bin">Thùng rác</string>
+    <string name="sort_date_modified">Ngày chỉnh sửa</string>
+    <string name="sort_date_created">Ngày tạo</string>
+    <string name="sort_name">Tên</string>
+
+    <!-- Folders -->
+    <string name="folders_title">Thư mục</string>
+    <string name="folder_all_documents">Tất cả tài liệu</string>
+    <string name="folder_uncategorized">Không phân loại</string>
+    <string name="new_folder_title">Tạo thư mục mới</string>
+    <string name="new_folder_hint">Tên thư mục</string>
+    <string name="rename_folder_title">Đổi tên thư mục</string>
+    <string name="delete_folder_title">Xoá thư mục?</string>
+    <string name="delete_folder_body">Tài liệu bên trong sẽ chuyển về mục \"Không phân loại\", không bị xoá.</string>
+
+    <!-- Select mode -->
+    <string name="select_mode_selected_count">Đã chọn %1$d</string>
+    <string name="select_mode_move_to_folder">Chuyển vào thư mục</string>
+    <string name="select_mode_delete">Xoá (%1$d)</string>
+
+    <!-- Tools bottom sheet -->
+    <string name="tools_title">Công cụ</string>
+    <string name="tools_document">Tài liệu</string>
+    <string name="tools_text">Văn bản</string>
+    <string name="tools_book">Sách</string>
+    <string name="tools_qr_code">Mã QR</string>
+    <string name="tools_create_section">Tạo</string>
+    <string name="tools_create_id_card">Thẻ ID</string>
+    <string name="tools_create_business_card">Danh thiếp</string>
+
+    <!-- Bottom bar -->
+    <string name="cd_tools_button">Công cụ</string>
+    <string name="cd_camera_button">Chụp tài liệu</string>
+    <string name="cd_gallery_button">Mở ảnh có sẵn</string>
+
+    <!-- Coming soon -->
+    <string name="coming_soon_badge">Sắp ra mắt</string>
+    <string name="coming_soon_toast">Tính năng đang được phát triển, sẽ sớm ra mắt.</string>
+
+    <!-- Settings screen -->
+    <string name="settings_title">Cài đặt</string>
+    <string name="settings_section_cloud">Dịch vụ đám mây</string>
+    <string name="settings_add_service">Thêm dịch vụ</string>
+    <string name="settings_add_service_desc">Kết nối Google Drive, Dropbox, OneDrive…</string>
+    <string name="settings_auto_upload">Tự động tải lên</string>
+    <string name="settings_auto_upload_desc">Tự động sao lưu tài liệu mới lên đám mây</string>
+    <string name="settings_section_app">Cài đặt ứng dụng</string>
+    <string name="settings_text_recognition">Nhận dạng văn bản (OCR)</string>
+    <string name="settings_text_recognition_desc">Tự động nhận dạng chữ sau khi quét</string>
+    <string name="settings_scanning">Quét tài liệu</string>
+    <string name="settings_advanced">Cài đặt nâng cao</string>
+    <string name="settings_email_template">Mẫu email</string>
+    <string name="settings_workflows">Quy trình tự động</string>
+    <string name="settings_signatures">Chữ ký</string>
+    <string name="settings_app_icon">Biểu tượng ứng dụng</string>
+    <string name="settings_upgrade_plus">Nâng cấp lên ScanX Plus</string>
+    <string name="settings_upgrade_plus_desc">Mở khoá toàn bộ tính năng cao cấp</string>
+    <string name="settings_recommend_app">Giới thiệu ứng dụng</string>
+    <string name="settings_version">Phiên bản %1$s</string>
+
+    <!-- Scanning settings sub-screen -->
+    <string name="scanning_settings_title">Cài đặt quét</string>
+    <string name="scanning_capture_mode">Chế độ chụp</string>
+    <string name="scanning_capture_mode_auto">Tự động</string>
+    <string name="scanning_capture_mode_manual">Thủ công</string>
+    <string name="scanning_auto_sensitivity">Độ nhạy chụp tự động</string>
+    <string name="scanning_auto_sensitivity_desc">Số khung hình ổn định trước khi tự chụp — thấp hơn = chụp nhanh hơn</string>
+    <string name="scanning_auto_sensitivity_fast">Nhanh</string>
+    <string name="scanning_auto_sensitivity_slow">Chuẩn</string>
+    <string name="scanning_flash_default">Bật đèn flash mặc định</string>
+
+    <!-- Advanced settings sub-screen -->
+    <string name="advanced_settings_title">Cài đặt nâng cao</string>
+    <string name="advanced_default_view">Chế độ hiển thị mặc định</string>
+    <string name="advanced_default_sort">Sắp xếp mặc định</string>
+    <string name="advanced_clear_cache">Xoá bộ nhớ đệm</string>
+
+    <!-- Trash screen -->
+    <string name="trash_title">Thùng rác</string>
+    <string name="trash_empty_state">Thùng rác trống.</string>
+    <string name="trash_auto_purge_notice">Tài liệu trong Thùng rác sẽ tự động xoá vĩnh viễn sau 30 ngày.</string>
+    <string name="trash_restore">Khôi phục</string>
+    <string name="trash_delete_forever">Xoá vĩnh viễn</string>
+    <string name="trash_delete_forever_confirm_title">Xoá vĩnh viễn?</string>
+    <string name="trash_delete_forever_confirm_body">Tài liệu sẽ bị xoá hoàn toàn, không thể khôi phục.</string>
+    <string name="trash_empty_all">Dọn sạch Thùng rác</string>
+    <string name="trash_empty_all_confirm_title">Dọn sạch Thùng rác?</string>
+    <string name="trash_empty_all_confirm_body">Toàn bộ tài liệu trong Thùng rác sẽ bị xoá vĩnh viễn.</string>
+    <string name="trash_days_left">Còn %1$d ngày</string>
+
+    <!-- Rename document -->
+    <string name="rename_document_title">Đổi tên tài liệu</string>
 </resources>

@@ -15,9 +15,15 @@ private val ScanXBackgroundDark = Color(0xFF101317)
 private val ScanXSurfaceLight = Color(0xFFFFFFFF)
 private val ScanXSurfaceDark = Color(0xFF1B1F24)
 
+// Màu cam nhấn dùng cho nút chụp camera & các điểm nhấn hành động chính, đồng nhất với colors.xml
+val ScanXAccentOrange = Color(0xFFFF7A1A)
+val ScanXLockedGray = Color(0xFF9AA1AB)
+
 private val LightColors = lightColorScheme(
     primary = ScanXPrimary,
     onPrimary = Color.White,
+    secondary = ScanXAccentOrange,
+    onSecondary = Color.White,
     background = ScanXBackgroundLight,
     surface = ScanXSurfaceLight,
 )
@@ -25,6 +31,8 @@ private val LightColors = lightColorScheme(
 private val DarkColors = darkColorScheme(
     primary = ScanXPrimaryDark,
     onPrimary = Color.White,
+    secondary = ScanXAccentOrange,
+    onSecondary = Color.White,
     background = ScanXBackgroundDark,
     surface = ScanXSurfaceDark,
 )

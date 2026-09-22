@@ -9,6 +9,10 @@ data class DocumentMeta(
     val id: String,
     val title: String,
     val createdAtEpochMillis: Long,
+    val modifiedAtEpochMillis: Long = createdAtEpochMillis,
     val pageCount: Int,
-    val ocrText: String
+    val ocrText: String,
+    val folderId: String? = null,
+    val isTrashed: Boolean = false,
+    val trashedAtEpochMillis: Long? = null,
 )
