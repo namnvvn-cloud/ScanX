@@ -171,12 +171,21 @@ object DocxWriter {
         Align.JUSTIFY -> "both"
     }
 
-    private fun runXml(text: String, fontPt: Float, bold: Boolean, color: Int = 0): String {
+    /**
+     * 1 run chữ. Chữ Hàn/Nhật/Trung: font Đông Á riêng (w:eastAsia + hint) và mã ngôn ngữ Đông Á → Word
+     * hiển thị đúng glyph, không ô vuông; chữ Latin trong cùng run vẫn dùng Times New Roman.
+     */
+    private fun runXml(text: String, fontPt: Float, bold: Boolean, color: Int = 0, lang: String = ""): String {
         val sz = (fontPt * 2).roundToInt()
-        return "<w:r><w:rPr><w:rFonts w:ascii=\"$DEFAULT_FONT\" w:hAnsi=\"$DEFAULT_FONT\" w:cs=\"$DEFAULT_FONT\"/>" +
+        val ea = Lang.isEastAsian(lang)
+        val eaFont = if (ea) Lang.fontFor(lang) else DEFAULT_FONT
+        val langAttr = if (ea) "<w:lang w:val=\"vi-VN\" w:eastAsia=\"${Lang.ooxml(lang)}\"/>"
+            else if (lang.isNotEmpty()) "<w:lang w:val=\"${Lang.ooxml(lang)}\"/>" else ""
+        return "<w:r><w:rPr><w:rFonts w:ascii=\"$DEFAULT_FONT\" w:hAnsi=\"$DEFAULT_FONT\" w:eastAsia=\"$eaFont\" w:cs=\"$DEFAULT_FONT\"" +
+            (if (ea) " w:hint=\"eastAsia\"" else "") + "/>" +
             (if (bold) "<w:b/><w:bCs/>" else "") +
             (if (color != 0) "<w:color w:val=\"${hexColor(color)}\"/>" else "") +
-            "<w:sz w:val=\"$sz\"/><w:szCs w:val=\"$sz\"/></w:rPr><w:t xml:space=\"preserve\">${xmlEscape(text)}</w:t></w:r>"
+            "<w:sz w:val=\"$sz\"/><w:szCs w:val=\"$sz\"/>$langAttr</w:rPr><w:t xml:space=\"preserve\">${xmlEscape(text)}</w:t></w:r>"
     }
 
     private fun paragraphXml(p: Paragraph, beforeTw: Int, leftTw: Int, firstLineTw: Int): String {
@@ -187,7 +196,7 @@ object DocxWriter {
             sb.append("<w:ind w:left=\"$left\"" + (if (firstLineTw > 40) " w:firstLine=\"$firstLineTw\"" else "") + "/>")
         }
         sb.append("<w:jc w:val=\"${jc(p.align)}\"/></w:pPr>")
-        sb.append(runXml(p.text, p.fontPt, p.bold, p.color))
+        sb.append(runXml(p.text, p.fontPt, p.bold, p.color, p.lang))
         sb.append("</w:p>")
         return sb.toString()
     }
@@ -216,7 +225,7 @@ object DocxWriter {
             "<wps:wsp><wps:cNvSpPr txBox=\"1\"/><wps:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"$cx\" cy=\"$cy\"/></a:xfrm>" +
             "<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></wps:spPr>" +
             "<wps:txbx><w:txbxContent><w:p><w:pPr><w:spacing w:before=\"0\" w:after=\"0\"/></w:pPr>" +
-            runXml(p.text, p.fontPt, p.bold, p.color) + "</w:p></w:txbxContent></wps:txbx>" +
+            runXml(p.text, p.fontPt, p.bold, p.color, p.lang) + "</w:p></w:txbxContent></wps:txbx>" +
             "<wps:bodyPr rot=\"0\" wrap=\"none\" lIns=\"0\" tIns=\"0\" rIns=\"0\" bIns=\"0\" anchor=\"t\"><a:spAutoFit/></wps:bodyPr>" +
             "</wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r>"
     }
@@ -271,6 +280,7 @@ object DocxWriter {
         }
         val uniform = fitted.values.sorted().let { if (it.isEmpty()) 12f else it[it.size / 2] }
 
+        val headerRows = TableStyle.headerRows(t)
         val border = if (t.bordered) "w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"000000\"" else "w:val=\"nil\""
         val sb = StringBuilder("<w:tbl><w:tblPr>")
         sb.append("<w:tblW w:w=\"$tblW\" w:type=\"dxa\"/>")
@@ -288,7 +298,7 @@ object DocxWriter {
             // nguyên hình dạng, không giãn làm tràn sang trang sau. Bảng không viền: tối thiểu.
             val h = ((t.rowEdges[r + 1] - t.rowEdges[r]) * twPerPx * (if (t.bordered) 1f else 0.9f)).roundToInt().coerceAtLeast(200)
             val rule = if (t.bordered) "exact" else "atLeast"
-            sb.append("<w:tr><w:trPr><w:cantSplit/><w:trHeight w:val=\"$h\" w:hRule=\"$rule\"/></w:trPr>")
+            sb.append("<w:tr><w:trPr><w:cantSplit/>" + (if (r < headerRows) "<w:tblHeader/>" else "") + "<w:trHeight w:val=\"$h\" w:hRule=\"$rule\"/></w:trPr>")
             var c = 0
             while (c < t.colCount) {
                 val cell = covering[r][c]
@@ -304,6 +314,7 @@ object DocxWriter {
                 val isOrigin = cell.row == r
                 if (cell.rowSpan > 1) sb.append(if (isOrigin) "<w:vMerge w:val=\"restart\"/>" else "<w:vMerge/>")
                 val va = when (cell.vAlign) { VAlign.TOP -> "top"; VAlign.CENTER -> "center"; VAlign.BOTTOM -> "bottom" }
+                if (cell.row < headerRows) sb.append("<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"${TableStyle.HEADER_FILL}\"/>")
                 sb.append("<w:vAlign w:val=\"$va\"/></w:tcPr>")
                 if (isOrigin && cell.paragraphs.isNotEmpty()) {
                     val cellLeftPx = t.colEdges[cell.col]

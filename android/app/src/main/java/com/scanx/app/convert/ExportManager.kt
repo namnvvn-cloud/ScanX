@@ -8,9 +8,7 @@ import android.graphics.Matrix
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.ParcelFileDescriptor
-import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.TextRecognizer
-import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.scanx.app.data.DocumentRepository
 import com.scanx.app.data.PdfExportMode
 import com.scanx.app.scan.OrientationDetector
@@ -137,10 +135,19 @@ class ExportManager(private val context: Context) {
         cloud: CloudConfig?,
         onProgress: (Int, Int) -> Unit,
         source: (TextRecognizer, (Int, Int, Bitmap) -> DocPage) -> List<DocPage>,
-    ): File {
-        val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+    ): File = writeDoc(buildDoc(title, cloud, onProgress, source), base, format)
+
+    /** Dựng mô hình bố cục (bảng, đoạn, ghi chú…) cho mọi trang của nguồn. */
+    private fun buildDoc(
+        title: String,
+        cloud: CloudConfig?,
+        onProgress: (Int, Int) -> Unit,
+        source: (TextRecognizer, (Int, Int, Bitmap) -> DocPage) -> List<DocPage>,
+    ): DocModel {
+        val ocr = MultiScriptOcr()
+        val recognizer = ocr.latinRecognizer
         try {
-            val extractor = PageLayoutExtractor(recognizer)
+            val extractor = PageLayoutExtractor(ocr)
             val client = cloud?.let { CloudAiClient(it.apiKey, it.model) }
             var lowConfidencePages = 0
             val pages = source(recognizer) { index, total, bmp ->
@@ -154,20 +161,101 @@ class ExportManager(private val context: Context) {
             if (client == null && lowConfidencePages > 0) {
                 lastNotice = "Có $lowConfidencePages trang chữ viết tay/khó đọc — bật \"AI Cloud\" khi xuất để nhận dạng chính xác."
             }
-            val doc = DocModel(title, pages)
-            val out = File(exportDir, "$base.${format.ext}")
-            out.outputStream().use { stream ->
-                when (format) {
-                    ExportFormat.DOCX -> DocxWriter.write(doc, stream)
-                    ExportFormat.XLSX -> XlsxWriter.write(doc, stream)
-                    ExportFormat.PPTX -> PptxWriter.write(doc, stream)
-                    else -> error("Định dạng không hỗ trợ chuyển đổi bố cục: $format")
+            return DocModel(title, pages)
+        } finally {
+            ocr.close()
+        }
+    }
+
+    private fun writeDoc(doc: DocModel, base: String, format: ExportFormat): File {
+        val out = File(exportDir, "$base.${format.ext}")
+        out.outputStream().use { stream ->
+            when (format) {
+                ExportFormat.DOCX -> DocxWriter.write(doc, stream)
+                ExportFormat.XLSX -> XlsxWriter.write(doc, stream)
+                ExportFormat.PPTX -> PptxWriter.write(doc, stream)
+                ExportFormat.TXT -> stream.write(Translation.plainText(doc).toByteArray(Charsets.UTF_8))
+                else -> error("Định dạng không hỗ trợ chuyển đổi bố cục: $format")
+            }
+        }
+        return out
+    }
+
+    // ------------------------------------------------------------------ Dịch sang tiếng Việt
+
+    /**
+     * Dịch tài liệu đã scan sang tiếng Việt, giữ nguyên bố cục: dựng bố cục như khi xuất Word (OCR đa
+     * ngôn ngữ, tuỳ chọn AI Cloud đọc chữ) → dịch từng đoạn/ô bằng [engine] → Word (.docx) hoặc .txt.
+     */
+    suspend fun translateDocument(
+        repo: DocumentRepository,
+        id: String,
+        title: String,
+        engine: TranslationEngine,
+        cloud: CloudConfig?,
+        output: ExportFormat,
+        onStatus: (String) -> Unit,
+    ): File = withContext(Dispatchers.IO) {
+        lastNotice = null
+        exportDir.listFiles()?.forEach { it.delete() }
+        val masters = repo.getPageFiles(id)
+        val legacyPdf = repo.getPdfFile(id)
+        val doc = buildDoc(title, cloud, { i, n -> onStatus("Đang nhận dạng chữ trang $i/$n…") }) { recognizer, consumer ->
+            if (masters.isNotEmpty()) forEachMaster(masters, consumer)
+            else renderPdf(legacyPdf) { i, n, bmp -> withUpright(recognizer, bmp) { consumer(i, n, it) } }
+        }
+        translateAndWrite(doc, safeName(title), engine, output, onStatus)
+    }
+
+    /** Dịch file PDF/ảnh import từ máy sang tiếng Việt. */
+    suspend fun translateImported(
+        uris: List<Uri>,
+        title: String,
+        engine: TranslationEngine,
+        cloud: CloudConfig?,
+        output: ExportFormat,
+        onStatus: (String) -> Unit,
+    ): File = withContext(Dispatchers.IO) {
+        lastNotice = null
+        exportDir.listFiles()?.forEach { it.delete() }
+        val first = uris.first()
+        val isPdf = context.contentResolver.getType(first)?.contains("pdf") == true || first.toString().endsWith(".pdf", true)
+        val progress: (Int, Int) -> Unit = { i, n -> onStatus("Đang nhận dạng chữ trang $i/$n…") }
+        val doc = if (isPdf) {
+            val tmp = File(context.cacheDir, "import_src.pdf")
+            context.contentResolver.openInputStream(first)?.use { input -> tmp.outputStream().use { input.copyTo(it) } }
+                ?: error("Không đọc được file đã chọn")
+            try {
+                buildDoc(title, cloud, progress) { recognizer, consumer ->
+                    renderPdf(tmp) { i, n, bmp -> withUpright(recognizer, bmp) { consumer(i, n, it) } }
+                }
+            } finally {
+                tmp.delete()
+            }
+        } else {
+            buildDoc(title, cloud, progress) { recognizer, consumer ->
+                uris.mapIndexed { i, uri ->
+                    val bmp = decodeImage(uri) ?: error("Không đọc được ảnh ${i + 1}")
+                    try { withUpright(recognizer, bmp) { consumer(i, uris.size, it) } } finally { bmp.recycle() }
                 }
             }
-            return out
-        } finally {
-            recognizer.close()
         }
+        translateAndWrite(doc, safeName(title), engine, output, onStatus)
+    }
+
+    private suspend fun translateAndWrite(doc: DocModel, base: String, engine: TranslationEngine, output: ExportFormat, onStatus: (String) -> Unit): File {
+        val items = Translation.collect(doc)
+        if (items.isEmpty()) {
+            lastNotice = "Tài liệu đã là tiếng Việt (hoặc không có chữ cần dịch) — xuất nguyên văn."
+        }
+        val langs = items.groupBy { it.lang }.entries.sortedByDescending { e -> e.value.sumOf { it.text.length } }
+            .joinToString(", ") { Lang.displayName(it.key) }
+        val translated = if (items.isEmpty()) emptyMap() else engine.translate(items, "ngôn ngữ nguồn: $langs; tiêu đề: ${doc.title}") { i, n ->
+            onStatus("${engine.label} đang dịch ($langs → Tiếng Việt) $i/$n…")
+        }
+        val missing = items.count { translated[it.id].isNullOrBlank() }
+        if (items.isNotEmpty() && missing > 0) lastNotice = "Còn $missing đoạn chưa dịch được (giữ nguyên văn gốc)."
+        return writeDoc(Translation.apply(doc, translated), base + "_TiengViet", output)
     }
 
     private fun <T> forEachMaster(masters: List<File>, consumer: (Int, Int, Bitmap) -> T): List<T> =

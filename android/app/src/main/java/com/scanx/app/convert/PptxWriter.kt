@@ -120,8 +120,8 @@ object PptxWriter {
 
     private fun runXml(p: Paragraph, sizePt: Float = p.fontPt): String {
         val sz = (sizePt * 100).roundToInt().coerceIn(100, 400000)
-        return "<a:p><a:pPr algn=\"${algn(p.align)}\"/><a:r><a:rPr lang=\"vi-VN\" sz=\"$sz\"" + (if (p.bold) " b=\"1\"" else "") + " dirty=\"0\">" +
-            "<a:solidFill><a:srgbClr val=\"${String.format(java.util.Locale.US, "%06X", p.color and 0xFFFFFF)}\"/></a:solidFill><a:latin typeface=\"$DEFAULT_FONT\"/><a:cs typeface=\"$DEFAULT_FONT\"/></a:rPr>" +
+        return "<a:p><a:pPr algn=\"${algn(p.align)}\"/><a:r><a:rPr lang=\"${Lang.ooxml(p.lang)}\"" + (if (Lang.isEastAsian(p.lang)) " altLang=\"vi-VN\"" else "") + " sz=\"$sz\"" + (if (p.bold) " b=\"1\"" else "") + " dirty=\"0\">" +
+            "<a:solidFill><a:srgbClr val=\"${String.format(java.util.Locale.US, "%06X", p.color and 0xFFFFFF)}\"/></a:solidFill><a:latin typeface=\"$DEFAULT_FONT\"/><a:ea typeface=\"${Lang.fontFor(p.lang)}\"/><a:cs typeface=\"$DEFAULT_FONT\"/></a:rPr>" +
             "<a:t>${xmlEscape(p.text)}</a:t></a:r></a:p>"
     }
 
@@ -139,8 +139,10 @@ object PptxWriter {
         val covering = Array(t.rowCount) { arrayOfNulls<TableCell>(t.colCount) }
         for (cell in t.cells) for (r in cell.row until min(t.rowCount, cell.row + cell.rowSpan)) for (c in cell.col until min(t.colCount, cell.col + cell.colSpan)) covering[r][c] = cell
         val line = "w=\"12700\"><a:solidFill><a:srgbClr val=\"000000\"/></a:solidFill>"
-        fun tcPr(anchor: String) = "<a:tcPr marL=\"45720\" marR=\"45720\" marT=\"0\" marB=\"0\" anchor=\"$anchor\">" +
-            "<a:lnL $line</a:lnL><a:lnR $line</a:lnR><a:lnT $line</a:lnT><a:lnB $line</a:lnB><a:noFill/></a:tcPr>"
+        fun tcPr(anchor: String, fill: Boolean = false) = "<a:tcPr marL=\"45720\" marR=\"45720\" marT=\"0\" marB=\"0\" anchor=\"$anchor\">" +
+            "<a:lnL $line</a:lnL><a:lnR $line</a:lnR><a:lnT $line</a:lnT><a:lnB $line</a:lnB>" +
+            (if (fill) "<a:solidFill><a:srgbClr val=\"${TableStyle.HEADER_FILL}\"/></a:solidFill>" else "<a:noFill/>") + "</a:tcPr>"
+        val headerRows = TableStyle.headerRows(t)
         val emptyBody = "<a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang=\"vi-VN\" sz=\"1000\" dirty=\"0\"/></a:p></a:txBody>"
         // Cỡ chữ đồng nhất cho chữ thường trong bảng (trung vị), vừa hàng thấp nhất (~2 dòng).
         val fonts = t.cells.flatMap { c -> c.paragraphs.filter { !it.bold }.map { it.fontPt } }.sorted()
@@ -163,10 +165,10 @@ object PptxWriter {
                     val attrs = (if (cell.colSpan > 1) " gridSpan=\"${cell.colSpan}\"" else "") + (if (cell.rowSpan > 1) " rowSpan=\"${cell.rowSpan}\"" else "")
                     val body = if (cell.paragraphs.isEmpty()) emptyBody
                     else "<a:txBody><a:bodyPr/><a:lstStyle/>" + cell.paragraphs.joinToString("") { runXml(it, if (it.bold) min(it.fontPt, minRowPt * 0.6f) else uniform) } + "</a:txBody>"
-                    sb.append("<a:tc$attrs>$body${tcPr(anchor)}</a:tc>")
+                    sb.append("<a:tc$attrs>$body${tcPr(anchor, r < headerRows)}</a:tc>")
                 } else {
                     val attrs = (if (c > cell.col) " hMerge=\"1\"" else "") + (if (r > cell.row) " vMerge=\"1\"" else "")
-                    sb.append("<a:tc$attrs>$emptyBody${tcPr(anchor)}</a:tc>")
+                    sb.append("<a:tc$attrs>$emptyBody${tcPr(anchor, r < headerRows)}</a:tc>")
                 }
             }
             sb.append("</a:tr>")

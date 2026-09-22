@@ -52,6 +52,7 @@ import com.scanx.app.ui.ScanCameraViewModel
 import com.scanx.app.ui.ScanViewModel
 import com.scanx.app.ui.screens.AdvancedSettingsScreen
 import com.scanx.app.ui.screens.CloudSettingsDialog
+import com.scanx.app.ui.screens.TranslateDialog
 import com.scanx.app.ui.screens.DocumentDetailScreen
 import com.scanx.app.ui.screens.HomeScreen
 import com.scanx.app.ui.screens.ScanCameraScreen
@@ -110,6 +111,10 @@ class MainActivity : ComponentActivity() {
                     var showCloudSettings by remember { mutableStateOf(false) }
                     var cloudConfigured by remember { mutableStateOf(viewModel.isCloudConfigured) }
                     var convertWithCloud by remember { mutableStateOf(false) }
+                    var translateUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
+                    val translatePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+                        if (!uris.isNullOrEmpty()) translateUris = uris
+                    }
                     val prefs = remember { com.scanx.app.data.AppPreferences(context) }
 
                     LaunchedEffect(errorMessage) {
@@ -207,6 +212,7 @@ class MainActivity : ComponentActivity() {
                                 onCameraClick = { requestCameraThenOpen() },
                                 onComingSoon = { showComingSoon() },
                                 onConvertFiles = { convertPicker.launch(arrayOf("application/pdf", "image/*")) },
+                                onTranslateFiles = { translatePicker.launch(arrayOf("application/pdf", "image/*")) },
                             )
                         }
 
@@ -294,6 +300,9 @@ class MainActivity : ComponentActivity() {
                                     },
                                     cloudConfigured = cloudConfigured,
                                     onOpenCloudSettings = { showCloudSettings = true },
+                                    onTranslate = { useClaude, cloudOcr, output, share ->
+                                        viewModel.translateDocument(document.id, useClaude, cloudOcr, output) { file -> deliver(listOf(file), output, share) }
+                                    },
                                     onDelete = {
                                         viewModel.moveToTrash(document.id)
                                         screen = Screen.Home
@@ -328,6 +337,21 @@ class MainActivity : ComponentActivity() {
                             },
                             confirmButton = {},
                             dismissButton = { TextButton(onClick = { convertUris = emptyList() }) { Text(getString(R.string.action_cancel)) } },
+                        )
+                    }
+
+                    // Dịch file import: chọn máy dịch / định dạng sau khi chọn file.
+                    if (translateUris.isNotEmpty()) {
+                        TranslateDialog(
+                            cloudConfigured = cloudConfigured,
+                            showShare = false,
+                            onDismiss = { translateUris = emptyList() },
+                            onOpenCloudSettings = { showCloudSettings = true },
+                            onConfirm = { useClaude, cloudOcr, output, _ ->
+                                val uris = translateUris
+                                translateUris = emptyList()
+                                viewModel.translateFiles(uris, useClaude, cloudOcr, output) { file -> convertedFile = file to output }
+                            },
                         )
                     }
 

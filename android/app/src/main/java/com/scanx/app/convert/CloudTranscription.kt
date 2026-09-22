@@ -14,7 +14,7 @@ import kotlin.math.roundToInt
  */
 object CloudTranscription {
 
-    class Slot(val id: String, val box: Box, val draft: String, val inTable: Boolean)
+    class Slot(val id: String, val box: Box, val draft: String, val inTable: Boolean, val lang: String = "")
 
     class ExtraText(val text: String, val box: Box)
 
@@ -23,12 +23,12 @@ object CloudTranscription {
         val out = ArrayList<Slot>()
         page.blocks.forEachIndexed { bi, b ->
             when (b) {
-                is ParagraphBlock -> out.add(Slot("p$bi", b.paragraph.box, b.paragraph.text, false))
+                is ParagraphBlock -> out.add(Slot("p$bi", b.paragraph.box, b.paragraph.text, false, b.paragraph.lang))
                 is TableBlock -> for (cell in b.cells) {
                     val r1 = min(b.rowCount, cell.row + cell.rowSpan)
                     val c1 = min(b.colCount, cell.col + cell.colSpan)
                     val box = Box(b.colEdges[cell.col], b.rowEdges[cell.row], b.colEdges[c1], b.rowEdges[r1])
-                    out.add(Slot("t${bi}r${cell.row}c${cell.col}", box, cell.paragraphs.joinToString("\n") { it.text }, b.bordered))
+                    out.add(Slot("t${bi}r${cell.row}c${cell.col}", box, cell.paragraphs.joinToString("\n") { it.text }, b.bordered, cell.paragraphs.firstOrNull()?.lang.orEmpty()))
                 }
                 is ImageBlock -> Unit
             }
@@ -46,7 +46,9 @@ object CloudTranscription {
                 "trang, và bản nháp OCR (thường sai với chữ viết tay).\n\n" +
                 "Nhiệm vụ: đọc chính xác chữ nằm TRONG TỪNG KHUNG trên ảnh và trả về đúng nội dung đó.\n" +
                 "Quy tắc:\n" +
-                "- Giữ nguyên ngôn ngữ gốc (tiếng Việt có dấu đầy đủ; tiếng Anh/Hàn… giữ nguyên), giữ nguyên số, " +
+                "- Giữ nguyên ngôn ngữ và hệ chữ gốc của từng ô: tiếng Việt có dấu đầy đủ, chính xác; tiếng Hàn bằng Hangul; " +
+                "tiếng Nhật bằng Kanji/Kana; tiếng Trung bằng Hán tự; tiếng Anh/Đức/Pháp… đúng chính tả và dấu (ä ö ü ß é è ç…). " +
+                "Mục \"ngôn ngữ\" chỉ là gợi ý của máy, ảnh mới là chuẩn. Giữ nguyên số, " +
                 "ký hiệu tiền (k, tr, đ, M…), dấu ngoặc, dấu +, /, ngày tháng như trên giấy. Không dịch, không giải thích, không sửa nội dung.\n" +
                 "- Ô không có chữ → chuỗi rỗng \"\". Chữ bị gạch xoá → bỏ qua.\n" +
                 "- Nhiều dòng trong 1 ô → nối bằng \\n.\n" +
@@ -61,7 +63,8 @@ object CloudTranscription {
             fun n(v: Float, d: Float) = (v / d * 1000f).roundToInt().coerceIn(0, 1000)
             sb.append(s.id).append(if (s.inTable) " (ô bảng)" else "").append(" [")
                 .append(n(s.box.left, w)).append(", ").append(n(s.box.top, h)).append(", ")
-                .append(n(s.box.right, w)).append(", ").append(n(s.box.bottom, h)).append("] nháp: \"")
+                .append(n(s.box.right, w)).append(", ").append(n(s.box.bottom, h)).append("]")
+                .append(if (s.lang.isNotEmpty()) " ngôn ngữ: ${s.lang}" else "").append(" nháp: \"")
                 .append(s.draft.replace("\"", "'").replace("\n", " ").take(120)).append("\"\n")
         }
         return sb.toString()
@@ -86,7 +89,7 @@ object CloudTranscription {
                     when {
                         ans == null -> blocks.add(b)
                         ans.isBlank() -> Unit
-                        else -> blocks.add(ParagraphBlock(b.paragraph.copy(text = clean(ans))))
+                        else -> blocks.add(ParagraphBlock(b.paragraph.copy(text = clean(ans), lang = Lang.detect(clean(ans), b.paragraph.lang))))
                     }
                 }
                 is TableBlock -> {
@@ -102,9 +105,9 @@ object CloudTranscription {
                         val font = template?.fontPt ?: min(domFont, max(8f, snap(rowPt * 0.5f / lines.size)))
                         val paras = lines.mapIndexed { i, text ->
                             val base = cell.paragraphs.getOrNull(i) ?: template
-                            base?.copy(text = text, fontPt = font) ?: Paragraph(
+                            base?.copy(text = text, fontPt = font, lang = Lang.detect(text, base.lang)) ?: Paragraph(
                                 text = text, align = Align.CENTER, fontPt = font, bold = false, indentPx = 0f,
-                                spaceBeforePx = 0f, box = cellBox, color = domColor,
+                                spaceBeforePx = 0f, box = cellBox, color = domColor, lang = Lang.detect(text),
                             )
                         }
                         cell.copy(paragraphs = paras, vAlign = if (cell.paragraphs.isEmpty()) VAlign.CENTER else cell.vAlign)
@@ -126,7 +129,7 @@ object CloudTranscription {
                 ParagraphBlock(
                     Paragraph(
                         text = text, align = Align.LEFT, fontPt = domFont, bold = false, indentPx = 0f, spaceBeforePx = 0f,
-                        box = box, lineBoxes = listOf(box), color = domColor, floating = true,
+                        box = box, lineBoxes = listOf(box), color = domColor, floating = true, lang = Lang.detect(text),
                     ),
                 ),
             )

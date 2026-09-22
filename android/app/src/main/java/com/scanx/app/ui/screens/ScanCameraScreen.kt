@@ -161,10 +161,10 @@ fun ScanCameraScreen(
                 .build()
                 .also { it.setAnalyzer(analysisExecutor) { proxy -> viewModel.onFrameAnalyzed(proxy) } }
             val imageCapture = ImageCapture.Builder()
-                // MINIMIZE_LATENCY thay cho Zero Shutter Lag: ZSL trả về khung đã nằm sẵn trong bộ đệm
-                // (có thể là khung lúc tay còn đang rung → ảnh mờ). Ảnh chụp ngay sau khi đã giữ yên 0,7 s
-                // và đã lấy nét vào tâm tài liệu → nét hơn, vẫn nhanh.
-                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                // Zero Shutter Lag: lấy ngay khung trong bộ đệm vòng → không trễ màn trập (~0 ms thay vì
+                // 200–400 ms). An toàn vì chỉ kích hoạt sau khi khung đã đứng yên + đủ nét suốt thời gian giữ
+                // (các khung trong bộ đệm đều là khung yên). Máy không hỗ trợ → CameraX tự lùi MINIMIZE_LATENCY.
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_ZERO_SHUTTER_LAG)
                 .setResolutionSelector(
                     ResolutionSelector.Builder()
                         .setAspectRatioStrategy(ratio43)

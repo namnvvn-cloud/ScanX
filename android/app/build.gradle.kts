@@ -96,6 +96,14 @@ dependencies {
 
     // OCR on-device, hỗ trợ tiếng Việt (Latin script)
     implementation("com.google.mlkit:text-recognition:16.0.1")
+    // OCR đa ngôn ngữ (nhúng sẵn model, chạy offline): Hàn / Nhật / Trung — tài liệu song ngữ, hợp đồng
+    // nước ngoài. Mỗi bộ cũng đọc được chữ Latin; ScanX gộp kết quả theo hệ chữ từng dòng.
+    implementation("com.google.mlkit:text-recognition-korean:16.0.1")
+    implementation("com.google.mlkit:text-recognition-japanese:16.0.1")
+    implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
+    // Nhận diện ngôn ngữ từng dòng (offline) + dịch offline (model ~30 MB/ngôn ngữ tải khi cần).
+    implementation("com.google.mlkit:language-id:17.0.6")
+    implementation("com.google.mlkit:translate:17.0.3")
 
     implementation("androidx.core:core-splashscreen:1.0.1")
 

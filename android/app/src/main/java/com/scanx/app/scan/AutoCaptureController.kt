@@ -44,7 +44,8 @@ fun maxCornerDistance(a: DetectedQuad, b: DetectedQuad): Float {
 /**
  * Máy trạng thái tự chụp — nhịp kiểu Scanner Pro: chỉ chụp khi trang ĐỦ ĐIỀU KIỆN và LÀ TRANG MỚI.
  *
- * Điều kiện chụp (tất cả phải đạt liên tục trong [holdMillis], mặc định 0,7 s):
+ * Điều kiện chụp (tất cả phải đạt liên tục trong [holdMillis], mặc định 0,45 s; nếu khung gần như
+ * bất động và ảnh ổn định thì chụp sớm sau ~0,27 s — nhịp tương đương CamScanner/Genius Scan):
  *  1. AI thấy đủ 4 góc với độ tin cậy ≥ [minConfidence]; cả 4 góc cách mép khung ≥ [edgeMargin]
  *     (không bị cắt mất góc giấy) và trang chiếm 12–97% khung.
  *  2. 4 góc đứng yên trong [stillTolerance]; nội dung trang không đổi giữa các khung (không có tay
@@ -58,16 +59,19 @@ fun maxCornerDistance(a: DetectedQuad, b: DetectedQuad): Float {
  *  Tay che, rung, mất khung chớp nhoáng KHÔNG còn làm chụp lại trang cũ như bản trước.
  */
 class AutoCaptureController(
-    var holdMillis: Long = 700L,
+    var holdMillis: Long = 450L,
     private val minConfidence: Float = 0.5f,
     private val stillTolerance: Float = 0.02f,
     private val edgeMargin: Float = 0.012f,
     private val newPageSimilarity: Float = 0.3f,
     private val samePageSimilarity: Float = 0.85f,
     private val removedMillis: Long = 700L,
-    private val minIntervalMillis: Long = 900L,
+    private val minIntervalMillis: Long = 600L,
     private val contentStableSimilarity: Float = 0.75f,
     private val sharpnessKeep: Float = 0.8f,
+    /** Chụp sớm: khung gần như bất động (< 0,6% khung) + nội dung rất ổn định → chỉ cần 60% thời gian giữ. */
+    private val earlyJitter: Float = 0.006f,
+    private val earlyFactor: Float = 0.6f,
 ) {
     enum class Hint { NONE, NO_DOCUMENT, EDGE, HOLD_STILL, WAIT_NEW_PAGE }
 
@@ -83,6 +87,7 @@ class AutoCaptureController(
     private var anchor: DetectedQuad? = null
     private var holdStart = 0L
     private var holdMaxTexture = 0f
+    private var veryStill = true
     private var prevSignature: FloatArray? = null
 
     private var lastCaptureAt = 0L
@@ -127,11 +132,17 @@ class AutoCaptureController(
             anchor = quad
             holdStart = nowMillis
             holdMaxTexture = texture
+            veryStill = true
             return Decision(0f, false, false, Hint.HOLD_STILL, holdStarted = true)
         }
         if (texture > holdMaxTexture) holdMaxTexture = texture
+        // Còn "rất yên" nếu mọi khung từ lúc bắt đầu giữ đều lệch < earlyJitter và nội dung gần như trùng khớp.
+        val contentSteady = prevSig == null || signature == null || texture <= 0.02f ||
+            AiDocumentDetector.pageSimilarity(prevSig, signature) > 0.9f
+        if (maxCornerDistance(a, quad) > earlyJitter || !contentSteady) veryStill = false
 
-        val progress = ((nowMillis - holdStart).toFloat() / holdMillis.coerceAtLeast(200L)).coerceIn(0f, 1f)
+        val needed = if (veryStill) (holdMillis * earlyFactor).toLong() else holdMillis
+        val progress = ((nowMillis - holdStart).toFloat() / needed.coerceAtLeast(150L)).coerceIn(0f, 1f)
         val sharpEnough = holdMaxTexture < AiDocumentDetector.BLANK_TEXTURE * 2 || texture >= holdMaxTexture * sharpnessKeep
         if (progress >= 1f && sharpEnough && nowMillis - lastCaptureAt >= minIntervalMillis) {
             markCaptured(quad, signature, nowMillis)

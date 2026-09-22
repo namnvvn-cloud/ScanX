@@ -42,6 +42,19 @@ class CloudAiClient(private val apiKey: String, private val model: String) {
                     ),
                 ),
             )
+        return applyAnswer(page, call(body))
+    }
+
+    /** Gửi 1 yêu cầu chỉ có chữ (vd dịch), trả về phần văn bản trả lời của mô hình. */
+    fun complete(prompt: String, maxTokens: Int = 8192): String {
+        val body = JSONObject()
+            .put("model", model)
+            .put("max_tokens", maxTokens)
+            .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", prompt)))
+        return call(body)
+    }
+
+    private fun call(body: JSONObject): String {
         val conn = (URL(ENDPOINT).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 20_000
@@ -71,7 +84,7 @@ class CloudAiClient(private val apiKey: String, private val model: String) {
                 val part = content.getJSONObject(i)
                 if (part.optString("type") == "text") sb.append(part.optString("text"))
             }
-            return applyAnswer(page, sb.toString())
+            return sb.toString()
         } finally {
             conn.disconnect()
         }

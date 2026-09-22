@@ -27,7 +27,7 @@ data class Box(val left: Float, val top: Float, val right: Float, val bottom: Fl
 }
 
 /** [color] = màu mực RGB (0 = đen/không rõ), [confidence] = độ tin cậy OCR 0..1. */
-data class OcrWord(val text: String, val box: Box, val color: Int = 0, val confidence: Float = 1f)
+data class OcrWord(val text: String, val box: Box, val color: Int = 0, val confidence: Float = 1f, val lang: String = "")
 
 /**
  * [strokeWidth] = độ dày nét chữ trung bình (px, đo bằng distance transform trên ảnh nhị phân của dòng).
@@ -40,6 +40,8 @@ data class OcrLine(
     val strokeWidth: Float = 0f,
     val color: Int = 0,
     val confidence: Float = 1f,
+    /** Ngôn ngữ của dòng ("vi", "ko", "ja", "zh", "en"…; "" = chưa rõ) — xem [Lang]. */
+    val lang: String = "",
 )
 
 /** Đoạn đường kẻ (ngang hoặc dọc) tách được từ ảnh bằng morphology. */
@@ -86,6 +88,8 @@ data class Paragraph(
      * (Word: khung định vị theo trang; Excel: ô cùng hàng bên cạnh bảng) thay vì xếp chồng lên trên bảng.
      */
     val floating: Boolean = false,
+    /** Ngôn ngữ của đoạn → font + thuộc tính ngôn ngữ trong Word/Excel/PowerPoint. */
+    val lang: String = "",
 )
 
 sealed class Block {

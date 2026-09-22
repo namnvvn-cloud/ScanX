@@ -54,7 +54,7 @@ object LayoutAnalyzer {
             }
             if (rest.isNotEmpty()) {
                 val box = Box.unionOf(rest.map { it.box })!!
-                freeLines.add(OcrLine(rest.joinToString(" ") { it.text }, box, rest, line.strokeWidth, line.color, line.confidence))
+                freeLines.add(OcrLine(rest.joinToString(" ") { it.text }, box, rest, line.strokeWidth, line.color, line.confidence, line.lang))
             }
         }
 
@@ -215,6 +215,7 @@ object LayoutAnalyzer {
                         (last.strokeWidth * last.box.width + l.strokeWidth * l.box.width) / max(1f, last.box.width + l.box.width),
                         if (last.box.width >= l.box.width) last.color else l.color,
                         min(last.confidence, l.confidence),
+                        if (last.lang == l.lang || l.lang.isEmpty()) last.lang else if (last.lang.isEmpty()) l.lang else if (last.text.length >= l.text.length) last.lang else l.lang,
                     )
                 } else {
                     merged.add(l)
@@ -254,7 +255,7 @@ object LayoutAnalyzer {
         return Paragraph(
             text = l.text, align = align, fontPt = lineFont(l, ptPerPx), bold = isBold(l.strokeWidth),
             indentPx = if (align == Align.LEFT) max(0f, lg) else 0f, spaceBeforePx = 0f, box = l.box,
-            lineBoxes = listOf(l.box), color = l.color,
+            lineBoxes = listOf(l.box), color = l.color, lang = l.lang,
         )
     }
 
@@ -286,6 +287,7 @@ object LayoutAnalyzer {
                         firstLineIndentPx = max(0f, first.box.left - restLeft).let { if (it > cw * 0.02f) it else 0f },
                         lineBoxes = group.map { it.box },
                         color = majorityColor(group.map { it.color to it.text.length }),
+                        lang = majorityLang(group.map { it.lang to it.text.length }),
                     ),
                 )
             }
@@ -304,7 +306,8 @@ object LayoutAnalyzer {
             val leftOk = abs(l.box.left - prevLeft) < 0.03f * cw || (group.size == 1 && l.box.left < prev.box.left)
             val startsList = LIST_MARKER.containsMatchIn(l.text.trim())
             val centered = abs((l.box.left - cl) - (cr - l.box.right)) < 0.09f * cw && l.box.left - cl > 0.06f * cw
-            if (prevFull && gapOk && sizeOk && leftOk && !startsList && !centered && isBold(prev.strokeWidth) == isBold(l.strokeWidth)) {
+            val sameLang = prev.lang.isEmpty() || l.lang.isEmpty() || prev.lang == l.lang
+            if (prevFull && gapOk && sizeOk && leftOk && !startsList && !centered && sameLang && isBold(prev.strokeWidth) == isBold(l.strokeWidth)) {
                 group.add(l)
             } else {
                 finish()
@@ -338,6 +341,7 @@ object LayoutAnalyzer {
                 byX.joinToString(" ") { it.first.text }, box, byX.map { it.first }, ink,
                 majorityColor(byX.map { it.first.color to it.first.text.length }),
                 byX.minOf { it.first.confidence },
+                majorityLang(byX.map { it.first.lang to it.first.text.length }),
             )
         }
         val cw = max(1f, cell.width)
@@ -367,6 +371,7 @@ object LayoutAnalyzer {
                     indentPx = 0f, spaceBeforePx = 0f, box = box,
                     lineBoxes = group.map { it.box },
                     color = majorityColor(group.map { it.color to it.text.length }),
+                    lang = majorityLang(group.map { it.lang to it.text.length }),
                 ),
             )
             group = ArrayList()
@@ -422,6 +427,10 @@ object LayoutAnalyzer {
         }
     }
 
+    /** Ngôn ngữ chiếm đa số (theo số ký tự). */
+    private fun majorityLang(items: List<Pair<String, Int>>): String =
+        items.filter { it.first.isNotEmpty() }.groupBy { it.first }.maxByOrNull { e -> e.value.sumOf { it.second } }?.key ?: ""
+
     /** Màu chiếm đa số (theo số ký tự); 0 = đen. */
     private fun majorityColor(items: List<Pair<Int, Int>>): Int =
         items.groupBy { it.first }.maxByOrNull { e -> e.value.sumOf { it.second } }?.key ?: 0
@@ -438,6 +447,7 @@ object LayoutAnalyzer {
         for (ch in text) {
             w += when {
                 ch == ' ' -> 0.25f
+                ch.code in 0x1100..0x11FF || ch.code in 0x2E80..0x9FFF || ch.code in 0xAC00..0xD7AF || ch.code in 0xF900..0xFAFF || ch.code in 0xFF00..0xFFEF -> 1.0f
                 ch.isUpperCase() -> if (ch == 'I') 0.33f else if (ch == 'M' || ch == 'W') 0.89f else 0.68f
                 ch.isLowerCase() -> if (ch in "ijlft") 0.28f else if (ch == 'm' || ch == 'w') 0.72f else 0.47f
                 ch.isDigit() -> 0.5f
@@ -456,7 +466,9 @@ object LayoutAnalyzer {
         val text = l.text.trim()
         if (text.length < 6) return byHeight
         val byWidth = l.box.width * ptPerPx / max(1f, widthEm(text))
-        return byWidth.coerceIn(byHeight * 0.7f, byHeight * 1.15f)
+        // Dòng dài: bề rộng dòng đáng tin hơn chiều cao hộp (hộp OCR phình vì dấu tiếng Việt / chữ Hàn).
+        return if (text.length >= 30) byWidth.coerceIn(byHeight * 0.6f, byHeight * 1.1f)
+        else byWidth.coerceIn(byHeight * 0.7f, byHeight * 1.15f)
     }
 
     private fun lineFont(l: OcrLine, ptPerPx: Float) = snapSize(lineFontRaw(l, ptPerPx))

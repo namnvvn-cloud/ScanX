@@ -97,7 +97,7 @@
     <string name="scanning_capture_mode_auto">Tự động</string>
     <string name="scanning_capture_mode_manual">Thủ công</string>
     <string name="scanning_auto_sensitivity">Độ nhạy chụp tự động</string>
-    <string name="scanning_auto_sensitivity_desc">Thời gian giữ yên tài liệu trước khi AI tự chụp (mỗi nấc 0,1 s, mặc định 0,7 s). AI chỉ chụp khi ảnh đủ nét, đủ 4 góc và là trang mới</string>
+    <string name="scanning_auto_sensitivity_desc">Thời gian giữ yên tài liệu trước khi AI tự chụp (mỗi nấc 90 ms, mặc định 0,45 s; tờ giấy đứng thật yên thì chụp sớm hơn). AI chỉ chụp khi ảnh đủ nét, đủ 4 góc và là trang mới</string>
     <string name="scanning_auto_sensitivity_fast">Nhanh</string>
     <string name="scanning_auto_sensitivity_slow">Chuẩn</string>
     <string name="scanning_flash_default">Bật đèn flash mặc định</string>
@@ -155,4 +155,18 @@
     <string name="tools_convert_cloud">AI Cloud</string>
     <string name="convert_choose_format">Chuyển đổi sang định dạng</string>
     <string name="convert_done_title">Chuyển đổi xong</string>
+    <!-- Dịch sang tiếng Việt -->
+    <string name="translate_title">Dịch sang tiếng Việt</string>
+    <string name="translate_desc">Giữ nguyên bố cục, bảng biểu; chỉ thay chữ bằng bản dịch. Tự nhận ngôn ngữ nguồn (Anh, Hàn, Nhật, Trung, Đức, Pháp…).</string>
+    <string name="translate_engine">Máy dịch</string>
+    <string name="translate_engine_claude">Claude AI — chính xác nhất (hiểu ngữ cảnh, thuật ngữ)</string>
+    <string name="translate_engine_claude_off">Claude AI — cần nhập API key trong Cài đặt</string>
+    <string name="translate_engine_mlkit">ML Kit offline — miễn phí, không gửi tài liệu ra ngoài (tải ~30 MB/ngôn ngữ lần đầu)</string>
+    <string name="translate_cloud_ocr">Đọc chữ bằng AI Cloud trước khi dịch (chữ viết tay, chữ mờ)</string>
+    <string name="translate_output">Định dạng bản dịch</string>
+    <string name="translate_output_docx">Word (.docx) — giữ bố cục</string>
+    <string name="translate_output_txt">Văn bản (.txt)</string>
+    <string name="translate_action">Dịch</string>
+    <string name="tools_translate">Dịch → Tiếng Việt</string>
+    <string name="cd_translate">Dịch sang tiếng Việt</string>
 </resources>

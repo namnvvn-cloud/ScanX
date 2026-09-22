@@ -2,11 +2,7 @@ package com.scanx.app.convert
 
 import android.graphics.Bitmap
 import android.graphics.Rect
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.text.Text
-import com.google.mlkit.vision.text.TextRecognizer
 import com.scanx.app.scan.ScanFilters
-import com.scanx.app.util.awaitTask
 import org.opencv.android.Utils
 import org.opencv.core.Core
 import org.opencv.core.CvType
@@ -22,14 +18,15 @@ import kotlin.math.max
  * Phần phụ thuộc Android của engine chuyển đổi: từ ảnh 1 trang (màu, đúng chiều) → [PageInput].
  *  - Chuẩn hoá ánh sáng trước (bản đen trắng A2 của [ScanFilters]) → OCR, đường kẻ, độ dày nét
  *    không bị bóng đổ/nền ố làm sai.
- *  - OCR: ML Kit Text Recognition v2 (on-device) → dòng + từ kèm toạ độ và độ tin cậy.
+ *  - OCR đa ngôn ngữ ([MultiScriptOcr]: Latin + Hàn/Nhật/Trung, gán ngôn ngữ từng dòng) → dòng + từ
+ *    kèm toạ độ, độ tin cậy, ngôn ngữ.
  *  - Đường kẻ bảng: nhị phân thích nghi + morphology mở với phần tử cấu trúc dài ngang/dọc.
  *  - Màu chữ: trung bình màu các điểm mực của từng dòng trên ảnh màu đã cân bằng trắng → quy về
  *    đen/xanh/đỏ/xanh lá/tím ([InkColor]).
  *  - Hình giữ nguyên dạng ảnh: CHỈ con dấu đỏ và vùng màu không chứa chữ (logo, hình minh hoạ);
  *    chữ viết bằng mực màu luôn được xuất thành chữ.
  */
-class PageLayoutExtractor(private val recognizer: TextRecognizer) {
+class PageLayoutExtractor(private val ocr: MultiScriptOcr) {
 
     suspend fun extract(page: Bitmap): PageInput {
         val rgba = Mat()
@@ -42,8 +39,11 @@ class PageLayoutExtractor(private val recognizer: TextRecognizer) {
         Utils.matToBitmap(shown, ocrBmp)
         shown.release()
         try {
-            val text = recognizer.process(InputImage.fromBitmap(ocrBmp, 0)).awaitTask()
-            val lines = ocrLines(text, gray, color)
+            val lines = ocr.recognize(ocrBmp).map { l ->
+                val r = Rect(l.box.left.toInt(), l.box.top.toInt(), l.box.right.toInt(), l.box.bottom.toInt())
+                val (stroke, ink) = strokeAndInk(gray, color, r)
+                l.copy(strokeWidth = stroke, color = ink, words = l.words.map { it.copy(color = ink) })
+            }
             val rules = detectRules(gray)
             val figures = detectFigures(rgba, page)
             return PageInput(page.width, page.height, lines, rules, figures)
@@ -53,23 +53,6 @@ class PageLayoutExtractor(private val recognizer: TextRecognizer) {
             gray.release()
             color.release()
         }
-    }
-
-    private fun Rect.toBox() = Box(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat())
-
-    private fun ocrLines(text: Text, gray: Mat, color: Mat): List<OcrLine> {
-        val out = ArrayList<OcrLine>()
-        for (block in text.textBlocks) {
-            for (line in block.lines) {
-                val rect = line.boundingBox ?: continue
-                val (stroke, ink) = strokeAndInk(gray, color, rect)
-                val words = line.elements.mapNotNull { el ->
-                    el.boundingBox?.let { OcrWord(el.text, it.toBox(), ink, el.confidence) }
-                }
-                out.add(OcrLine(line.text, rect.toBox(), words, stroke, ink, line.confidence))
-            }
-        }
-        return out
     }
 
     /**

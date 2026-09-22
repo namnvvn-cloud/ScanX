@@ -42,7 +42,7 @@ import java.util.concurrent.Executors
 /**
  * Điều phối 1 phiên quét:
  *  - Luồng phân tích (ImageAnalysis RGBA 640×480): AI DocAligner phát hiện 4 góc → làm mượt →
- *    [AutoCaptureController] (giữ yên 0,7 s, đủ nét, đủ 4 góc, chỉ chụp TRANG MỚI).
+ *    [AutoCaptureController] (giữ yên 0,45 s — rất yên thì 0,27 s, đủ nét, đủ 4 góc, chỉ chụp TRANG MỚI).
  *  - Khi chụp: ảnh ~8 MP → AI chạy lại trên ảnh chụp → tinh chỉnh góc dưới-pixel → làm phẳng đúng
  *    tỉ lệ giấy thật → tự xoay đúng chiều đọc → kiểm tra trùng trang lần 2 trên ảnh đã làm phẳng →
  *    lưu master màu ra đĩa, hiển thị bản đen trắng (chế độ mặc định). Xử lý nối tiếp theo thứ tự chụp.
@@ -219,7 +219,7 @@ class ScanCameraViewModel(application: Application) : AndroidViewModel(applicati
                     } else {
                         null
                     }?.takeIf { it.confidence >= REFINE_MIN_CONFIDENCE }
-                    // Khung trên luồng xem trước đã đứng yên 0,7 s nên đáng tin; kết quả AI trên ảnh chụp chỉ
+                    // Khung trên luồng xem trước đã đứng yên suốt thời gian giữ nên đáng tin; kết quả AI trên ảnh chụp chỉ
                     // thay thế khi khớp với nó (tránh trường hợp AI nhận nhầm vật khác làm trang giấy).
                     val quad = when {
                         refined != null && liveQuad != null -> if (maxCornerDistance(refined, liveQuad) < 0.06f) refined else liveQuad
@@ -328,8 +328,8 @@ class ScanCameraViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     companion object {
-        /** Mỗi nấc độ nhạy trong Cài đặt = 0,1 s giữ yên (mặc định 7 nấc = 0,7 s — nhịp kiểu Scanner Pro). */
-        const val HOLD_MS_PER_STEP = 100L
+        /** Mỗi nấc độ nhạy trong Cài đặt = 90 ms giữ yên (mặc định 5 nấc = 0,45 s; khung rất yên chỉ ~0,27 s). */
+        const val HOLD_MS_PER_STEP = 90L
         private const val CAPTURE_MAX_SIDE = 3264
         private const val PAGE_MAX_SIDE = 2800
         private const val PREVIEW_MAX_SIDE = 900

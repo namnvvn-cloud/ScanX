@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Slideshow
 import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material.icons.filled.TextSnippet
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -96,7 +97,9 @@ fun DocumentDetailScreen(
     onDelete: () -> Unit,
     cloudConfigured: Boolean,
     onOpenCloudSettings: () -> Unit,
+    onTranslate: (useClaude: Boolean, cloudOcr: Boolean, output: ExportFormat, share: Boolean) -> Unit,
 ) {
+    var showTranslate by remember { mutableStateOf(false) }
     val docMode = PdfExportMode.fromCode(document.pdfMode)
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showExportSheet by remember { mutableStateOf(false) }
@@ -112,6 +115,9 @@ fun DocumentDetailScreen(
                 actions = {
                     IconButton(onClick = { onExport(ExportFormat.PDF, docMode, false, true) }) {
                         Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.action_share))
+                    }
+                    IconButton(onClick = { showTranslate = true }) {
+                        Icon(Icons.Filled.Translate, contentDescription = stringResource(R.string.cd_translate))
                     }
                     IconButton(onClick = { showExportSheet = true }) {
                         Icon(Icons.Filled.FileDownload, contentDescription = stringResource(R.string.export_title))
@@ -149,6 +155,16 @@ fun DocumentDetailScreen(
             onDismiss = { showExportSheet = false },
             onExport = { format, mode, cloud, share -> showExportSheet = false; onExport(format, mode, cloud, share) },
             onOpenCloudSettings = onOpenCloudSettings,
+        )
+    }
+
+    if (showTranslate) {
+        TranslateDialog(
+            cloudConfigured = cloudConfigured,
+            showShare = true,
+            onDismiss = { showTranslate = false },
+            onOpenCloudSettings = { showTranslate = false; onOpenCloudSettings() },
+            onConfirm = { useClaude, cloudOcr, output, share -> showTranslate = false; onTranslate(useClaude, cloudOcr, output, share) },
         )
     }
 

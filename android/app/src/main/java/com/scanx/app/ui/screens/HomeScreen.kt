@@ -31,6 +31,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
@@ -129,6 +130,7 @@ fun HomeScreen(
     onCameraClick: () -> Unit,
     onComingSoon: () -> Unit,
     onConvertFiles: () -> Unit = {},
+    onTranslateFiles: () -> Unit = {},
 ) {
     var selectMode by rememberSaveable { mutableStateOf(false) }
     var selectedIds by rememberSaveable { mutableStateOf(setOf<String>()) }
@@ -355,6 +357,7 @@ fun HomeScreen(
             onDismiss = { showToolsSheet = false },
             onDocumentClick = { showToolsSheet = false; onCameraClick() },
             onConvertClick = { showToolsSheet = false; onConvertFiles() },
+            onTranslateClick = { showToolsSheet = false; onTranslateFiles() },
             onComingSoon = { showToolsSheet = false; onComingSoon() },
         )
     }
@@ -690,6 +693,7 @@ private fun ToolsBottomSheet(
     onDismiss: () -> Unit,
     onDocumentClick: () -> Unit,
     onConvertClick: () -> Unit,
+    onTranslateClick: () -> Unit,
     onComingSoon: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState()
@@ -720,7 +724,7 @@ private fun ToolsBottomSheet(
             ) {
                 ToolItem(Icons.Filled.SwapHoriz, stringResource(R.string.tools_convert_office), locked = false, onClick = onConvertClick)
                 ToolItem(Icons.Filled.AutoAwesome, stringResource(R.string.tools_convert_cloud), locked = false, onClick = onConvertClick)
-                Spacer(Modifier.width(76.dp))
+                ToolItem(Icons.Filled.Translate, stringResource(R.string.tools_translate), locked = false, onClick = onTranslateClick)
                 Spacer(Modifier.width(76.dp))
             }
         }

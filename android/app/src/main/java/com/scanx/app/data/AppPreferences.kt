@@ -22,7 +22,7 @@ class AppPreferences(context: Context) {
         }.getOrDefault(CaptureMode.AUTO)
         set(value) = prefs.edit().putString(KEY_CAPTURE_MODE, value.name).apply()
 
-    /** Độ nhạy tự chụp: số nấc × 0,1 s tài liệu phải đứng yên trước khi tự chụp (mặc định 7 = 0,7 s). */
+    /** Độ nhạy tự chụp: số nấc × 90 ms tài liệu phải đứng yên trước khi tự chụp (mặc định 5 = 0,45 s). */
     var autoCaptureStableFrames: Int
         get() = prefs.getInt(KEY_STABLE_FRAMES, DEFAULT_STABLE_FRAMES)
         set(value) = prefs.edit().putInt(KEY_STABLE_FRAMES, value.coerceIn(3, 15)).apply()
@@ -65,6 +65,6 @@ class AppPreferences(context: Context) {
         private const val KEY_VIEW_MODE = "view_mode"
         private const val KEY_CLOUD_KEY = "cloud_api_key"
         private const val KEY_CLOUD_MODEL = "cloud_model"
-        const val DEFAULT_STABLE_FRAMES = 7
+        const val DEFAULT_STABLE_FRAMES = 5
     }
 }

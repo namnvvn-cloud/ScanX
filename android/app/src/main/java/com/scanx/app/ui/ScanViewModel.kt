@@ -11,6 +11,10 @@ import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.scanx.app.convert.CloudConfig
 import com.scanx.app.convert.ExportFormat
+import com.scanx.app.convert.MultiScriptOcr
+import com.scanx.app.convert.ClaudeTranslator
+import com.scanx.app.convert.MlKitTranslator
+import com.scanx.app.convert.TranslationEngine
 import com.scanx.app.convert.ExportManager
 import com.scanx.app.data.AppPreferences
 import com.scanx.app.data.DocumentMeta
@@ -138,6 +142,52 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                 exporter.lastNotice?.let { _errorMessage.value = it }
             } catch (e: Throwable) {
                 _errorMessage.value = "Chuyển đổi thất bại: ${e.message}"
+            } finally {
+                _exportStatus.value = null
+            }
+        }
+    }
+
+    private fun translationEngine(useClaude: Boolean): TranslationEngine =
+        if (useClaude && prefs.cloudApiKey.isNotBlank()) ClaudeTranslator(prefs.cloudApiKey, prefs.cloudModel) else MlKitTranslator()
+
+    /**
+     * Dịch tài liệu đã scan sang tiếng Việt (giữ bố cục). [useClaude] = dịch bằng Claude (cần API key),
+     * ngược lại ML Kit offline. [cloudOcr] = đọc chữ bằng AI Cloud trước khi dịch (chữ viết tay/mờ).
+     */
+    fun translateDocument(id: String, useClaude: Boolean, cloudOcr: Boolean, output: ExportFormat, onDone: (File) -> Unit) {
+        val doc = repository.getDocument(id) ?: return
+        if (_exportStatus.value != null) return
+        viewModelScope.launch {
+            _exportStatus.value = "Đang chuẩn bị dịch…"
+            try {
+                val file = exporter.translateDocument(repository, id, doc.title, translationEngine(useClaude), cloudConfig(cloudOcr), output) {
+                    _exportStatus.value = it
+                }
+                onDone(file)
+                exporter.lastNotice?.let { _errorMessage.value = it }
+            } catch (e: Throwable) {
+                _errorMessage.value = "Dịch thất bại: ${e.message}"
+            } finally {
+                _exportStatus.value = null
+            }
+        }
+    }
+
+    /** Dịch file PDF/ảnh import sang tiếng Việt. */
+    fun translateFiles(uris: List<Uri>, useClaude: Boolean, cloudOcr: Boolean, output: ExportFormat, onDone: (File) -> Unit) {
+        if (uris.isEmpty() || _exportStatus.value != null) return
+        viewModelScope.launch {
+            _exportStatus.value = "Đang chuẩn bị dịch…"
+            try {
+                val title = "ScanX dịch " + java.text.SimpleDateFormat("dd-MM-yyyy HHmm", Locale("vi", "VN")).format(java.util.Date())
+                val file = exporter.translateImported(uris, title, translationEngine(useClaude), cloudConfig(cloudOcr), output) {
+                    _exportStatus.value = it
+                }
+                onDone(file)
+                exporter.lastNotice?.let { _errorMessage.value = it }
+            } catch (e: Throwable) {
+                _errorMessage.value = "Dịch thất bại: ${e.message}"
             } finally {
                 _exportStatus.value = null
             }
@@ -290,28 +340,32 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun recognizeMasters(masters: List<File>): OcrResult {
         val builder = StringBuilder()
         val layers = ArrayList<List<PdfTextLine>>()
+        val ocr = MultiScriptOcr()
+        try {
         for ((index, file) in masters.withIndex()) {
             val pageLines = ArrayList<PdfTextLine>()
             try {
                 val master = BitmapFactory.decodeFile(file.absolutePath) ?: error("ảnh trang lỗi")
                 val bw = ScanFilters.renderBitmap(master, PdfExportMode.BW_HQ, 3000)
                 master.recycle()
-                val result = recognizer.process(InputImage.fromBitmap(bw, 0)).awaitTask()
+                val lines = ocr.recognize(bw)
                 val w = bw.width.toFloat()
                 val h = bw.height.toFloat()
                 bw.recycle()
-                if (result.text.isNotBlank()) {
+                if (lines.isNotEmpty()) {
                     if (masters.size > 1) builder.append("--- Trang ${index + 1} ---\n")
-                    builder.append(result.text).append("\n\n")
+                    builder.append(lines.joinToString("\n") { it.text }).append("\n\n")
                 }
-                for (block in result.textBlocks) for (line in block.lines) {
-                    val r = line.boundingBox ?: continue
-                    pageLines.add(PdfTextLine(line.text, r.left / w, r.top / h, r.right / w, r.bottom / h))
+                for (l in lines) {
+                    pageLines.add(PdfTextLine(l.text, l.box.left / w, l.box.top / h, l.box.right / w, l.box.bottom / h))
                 }
             } catch (e: Exception) {
                 // Bỏ qua lỗi OCR của 1 trang, không chặn việc lưu cả tài liệu.
             }
             layers.add(pageLines)
+        }
+        } finally {
+            ocr.close()
         }
         return OcrResult(builder.toString().trim(), layers)
     }
