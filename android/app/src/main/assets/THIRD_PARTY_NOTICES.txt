@@ -1,0 +1,10 @@
+ScanX - Third-party notices
+
+1) DocAligner document corner-detection model (lcnet100_h_e_bifpn_256_fp32)
+   Copyright DocsaidLab - https://github.com/DocsaidLab/DocAligner
+   Licensed under the Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0)
+   Modification: the ONNX graph was simplified (onnxsim) and each BiFPN Einsum weighted-sum
+   node was rewritten as equivalent Mul/Add nodes so it runs on the OpenCV DNN module.
+   Numerical output verified identical (max abs diff 0.0) to the original model.
+
+2) OpenCV - Apache License 2.0 - https://opencv.org

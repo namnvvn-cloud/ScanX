@@ -97,7 +97,7 @@
     <string name="scanning_capture_mode_auto">Tự động</string>
     <string name="scanning_capture_mode_manual">Thủ công</string>
     <string name="scanning_auto_sensitivity">Độ nhạy chụp tự động</string>
-    <string name="scanning_auto_sensitivity_desc">Số khung hình ổn định trước khi tự chụp — thấp hơn = chụp nhanh hơn</string>
+    <string name="scanning_auto_sensitivity_desc">Thời gian giữ yên tài liệu trước khi AI tự chụp (mỗi nấc 60 ms) — thấp hơn = chụp nhanh hơn</string>
     <string name="scanning_auto_sensitivity_fast">Nhanh</string>
     <string name="scanning_auto_sensitivity_slow">Chuẩn</string>
     <string name="scanning_flash_default">Bật đèn flash mặc định</string>

@@ -6,6 +6,10 @@ import android.widget.Toast
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.resolutionselector.AspectRatioStrategy
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -56,6 +60,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.geometry.Size as ComposeSize
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
@@ -63,6 +69,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.scanx.app.data.CaptureMode
+import com.scanx.app.scan.DetectedQuad
 import com.scanx.app.ui.ScanCameraViewModel
 import kotlinx.coroutines.delay
 import java.util.concurrent.Executors
@@ -88,6 +95,10 @@ fun ScanCameraScreen(
     val pages by viewModel.pages.collectAsStateWithLifecycle()
     val captureEvent by viewModel.captureEvent.collectAsStateWithLifecycle()
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
+    val autoProgress by viewModel.autoProgress.collectAsStateWithLifecycle()
+    val waitingForNewPage by viewModel.waitingForNewPage.collectAsStateWithLifecycle()
+    val isAiReady by viewModel.isAiReady.collectAsStateWithLifecycle()
+    val processingCount by viewModel.processingCount.collectAsStateWithLifecycle()
 
     var camera by remember { mutableStateOf<Camera?>(null) }
     var showReview by remember { mutableStateOf(false) }
@@ -97,6 +108,7 @@ fun ScanCameraScreen(
     val previewView = remember {
         PreviewView(context).apply {
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+            scaleType = PreviewView.ScaleType.FILL_CENTER
         }
     }
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
@@ -120,14 +132,44 @@ fun ScanCameraScreen(
         val providerFuture = ProcessCameraProvider.getInstance(context)
         providerFuture.addListener({
             val provider = providerFuture.get()
-            val preview = Preview.Builder().build().also {
-                it.setSurfaceProvider(previewView.surfaceProvider)
-            }
+            // Preview, phân tích và chụp đều cùng tỉ lệ 4:3 (toàn cảm biến) → cùng trường nhìn,
+            // toạ độ 4 góc AI tìm được trên khung phân tích khớp tuyệt đối với ảnh xem trước và ảnh chụp.
+            val ratio43 = AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY
+            val preview = Preview.Builder()
+                .setResolutionSelector(ResolutionSelector.Builder().setAspectRatioStrategy(ratio43).build())
+                .build()
+                .also { it.setSurfaceProvider(previewView.surfaceProvider) }
             val analysis = ImageAnalysis.Builder()
+                .setResolutionSelector(
+                    ResolutionSelector.Builder()
+                        .setAspectRatioStrategy(ratio43)
+                        .setResolutionStrategy(
+                            ResolutionStrategy(
+                                AndroidSize(640, 480),
+                                ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER,
+                            ),
+                        )
+                        .build(),
+                )
+                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .setTargetResolution(AndroidSize(1280, 960))
                 .build()
                 .also { it.setAnalyzer(analysisExecutor) { proxy -> viewModel.onFrameAnalyzed(proxy) } }
+            val imageCapture = ImageCapture.Builder()
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                .setResolutionSelector(
+                    ResolutionSelector.Builder()
+                        .setAspectRatioStrategy(ratio43)
+                        .setResolutionStrategy(
+                            ResolutionStrategy(
+                                AndroidSize(2560, 1920),
+                                ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER,
+                            ),
+                        )
+                        .build(),
+                )
+                .build()
+            viewModel.attachImageCapture(imageCapture)
 
             try {
                 provider.unbindAll()
@@ -136,6 +178,7 @@ fun ScanCameraScreen(
                     CameraSelector.DEFAULT_BACK_CAMERA,
                     preview,
                     analysis,
+                    imageCapture,
                 )
             } catch (e: Exception) {
                 Toast.makeText(context, "Không mở được camera: ${e.message}", Toast.LENGTH_LONG).show()
@@ -143,6 +186,7 @@ fun ScanCameraScreen(
         }, ContextCompat.getMainExecutor(context))
 
         onDispose {
+            viewModel.attachImageCapture(null)
             runCatching { ProcessCameraProvider.getInstance(context).get().unbindAll() }
             analysisExecutor.shutdown()
         }
@@ -155,11 +199,13 @@ fun ScanCameraScreen(
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
 
-        // Khung xanh theo dõi biên tài liệu phát hiện được real-time.
+        // Khung theo dõi biên tài liệu real-time. Map toạ độ đúng cách PreviewView FILL_CENTER hiển
+        // thị (phóng to phủ kín màn hình rồi cắt 2 bên) — bản cũ nhân thẳng với kích thước màn hình
+        // nên khung bị bóp hẹp/lệch khỏi mép giấy.
         Canvas(modifier = Modifier.fillMaxSize()) {
             val quad = detectedQuad
             if (quad != null && quad.points.size == 4) {
-                val pts = quad.points.map { Offset(it.x * size.width, it.y * size.height) }
+                val pts = mapToView(quad, size)
                 val path = Path().apply {
                     moveTo(pts[0].x, pts[0].y)
                     lineTo(pts[1].x, pts[1].y)
@@ -167,9 +213,37 @@ fun ScanCameraScreen(
                     lineTo(pts[3].x, pts[3].y)
                     close()
                 }
-                drawPath(path, color = Color(0xFF34D058), style = Stroke(width = 5.dp.toPx()))
+                val ready = captureMode == CaptureMode.AUTO && autoProgress > 0f
+                val color = when {
+                    waitingForNewPage -> Color(0xFFFFFFFF)
+                    ready -> Color(0xFF34D058)
+                    else -> Color(0xFF4FC3F7)
+                }
+                drawPath(path, color = color.copy(alpha = 0.18f))
+                drawPath(path, color = color, style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round))
+                pts.forEach { drawCircle(color = color, radius = 6.dp.toPx(), center = it) }
             }
         }
+
+        // Dòng trạng thái hướng dẫn người dùng.
+        val hint = when {
+            !isAiReady -> "Đang khởi động AI nhận diện…"
+            captureMode == CaptureMode.MANUAL -> if (detectedQuad != null) "Đã bắt được tài liệu — bấm nút để chụp" else "Đưa tài liệu vào khung hình"
+            waitingForNewPage -> "Đã chụp ✓  Lật sang trang tiếp theo"
+            detectedQuad == null -> "Đưa tài liệu vào khung hình"
+            autoProgress > 0f -> "Giữ yên…"
+            else -> "Đang căn chỉnh…"
+        }
+        Text(
+            text = if (processingCount > 0) "$hint  •  đang xử lý $processingCount trang" else hint,
+            color = Color.White,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 80.dp)
+                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
+                .padding(horizontal = 14.dp, vertical = 6.dp),
+        )
 
         AnimatedVisibility(visible = flashFrame, modifier = Modifier.fillMaxSize()) {
             Box(modifier = Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.5f)))
@@ -226,7 +300,10 @@ fun ScanCameraScreen(
                     onClick = { if (pages.isNotEmpty()) showReview = true },
                 )
 
-                ShutterButton(onClick = { viewModel.captureManually() })
+                ShutterButton(
+                    progress = if (captureMode == CaptureMode.AUTO) autoProgress else 0f,
+                    onClick = { viewModel.captureManually() },
+                )
 
                 TextButton(
                     onClick = onDone,
@@ -295,20 +372,44 @@ private fun CaptureModeSwitch(mode: CaptureMode, onModeChange: (CaptureMode) -> 
 }
 
 @Composable
-private fun ShutterButton(onClick: () -> Unit) {
+private fun ShutterButton(progress: Float, onClick: () -> Unit) {
     Box(
         modifier = Modifier
-            .size(72.dp)
-            .background(Color.White, CircleShape)
+            .size(76.dp)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val stroke = 5.dp.toPx()
+            drawCircle(color = Color.White, radius = size.minDimension / 2 - stroke / 2, style = Stroke(width = stroke))
+            if (progress > 0f) {
+                drawArc(
+                    color = Color(0xFF34D058),
+                    startAngle = -90f,
+                    sweepAngle = 360f * progress,
+                    useCenter = false,
+                    topLeft = Offset(stroke / 2, stroke / 2),
+                    size = ComposeSize(size.width - stroke, size.height - stroke),
+                    style = Stroke(width = stroke, cap = StrokeCap.Round),
+                )
+            }
+        }
         Box(
             modifier = Modifier
                 .size(58.dp)
                 .background(Color(0xFFFF7A1A), CircleShape),
         )
     }
+}
+
+/** Map 4 góc chuẩn hoá (theo khung phân tích đứng) sang toạ độ màn hình của PreviewView FILL_CENTER. */
+private fun mapToView(quad: DetectedQuad, view: ComposeSize): List<Offset> {
+    val fw = quad.frameWidth.toFloat().coerceAtLeast(1f)
+    val fh = quad.frameHeight.toFloat().coerceAtLeast(1f)
+    val scale = maxOf(view.width / fw, view.height / fh)
+    val dx = (view.width - fw * scale) / 2f
+    val dy = (view.height - fh * scale) / 2f
+    return quad.points.map { Offset(it.x * fw * scale + dx, it.y * fh * scale + dy) }
 }
 
 @Composable
