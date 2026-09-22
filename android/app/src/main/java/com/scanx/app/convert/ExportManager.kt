@@ -4,13 +4,22 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.TextRecognizer
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import com.scanx.app.data.DocumentRepository
+import com.scanx.app.data.PdfExportMode
+import com.scanx.app.scan.OrientationDetector
+import com.scanx.app.scan.ScanFilters
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import org.opencv.android.Utils
+import org.opencv.core.Mat
 import java.io.File
 
 enum class ExportFormat(val ext: String, val mime: String, val label: String) {
@@ -22,76 +31,129 @@ enum class ExportFormat(val ext: String, val mime: String, val label: String) {
     TXT("txt", "text/plain", "Văn bản (.txt)"),
 }
 
+/** Cấu hình AI Cloud cho 1 lần xuất (null = chỉ xử lý trên máy). */
+class CloudConfig(val apiKey: String, val model: String)
+
 /**
- * Điều phối xuất / chuyển đổi tài liệu, chạy 100% trên máy (không gửi tài liệu ra ngoài):
- *   nguồn (PDF đã scan, PDF hoặc ảnh import) → dựng ảnh từng trang (PdfRenderer ~200 DPI)
- *   → [PageLayoutExtractor] (ML Kit OCR + OpenCV) → [LayoutAnalyzer] → Docx/Xlsx/PptxWriter.
+ * Điều phối xuất / chuyển đổi tài liệu:
+ *  - PDF: dựng lại từ ảnh master theo 1 trong 4 chế độ (A1/A2/B1/B2) — tài liệu cũ thì sao chép PDF sẵn có.
+ *  - JPG: ảnh từng trang theo chế độ màu/đen trắng đã chọn.
+ *  - Word/Excel/PowerPoint: master (màu, đúng chiều) → [PageLayoutExtractor] (OCR + đường kẻ) →
+ *    [LayoutAnalyzer] → (tuỳ chọn) [CloudAiClient] đọc lại chữ viết tay → Docx/Xlsx/PptxWriter.
+ *    Kết quả 100% chữ + bảng thật (không dán ảnh chụp).
  * Xử lý tuần tự từng trang và giải phóng ảnh ngay → không tràn RAM với tài liệu nhiều trang.
  */
 class ExportManager(private val context: Context) {
 
     private val exportDir: File get() = File(context.cacheDir, "exports").apply { mkdirs() }
 
-    /** Xuất tài liệu đã scan (file PDF trong app) sang [format]. Trả về các file kết quả (JPG có thể nhiều file). */
-    suspend fun exportPdf(pdf: File, title: String, ocrText: String, format: ExportFormat, onProgress: (Int, Int) -> Unit = { _, _ -> }): List<File> =
-        withContext(Dispatchers.IO) {
-            val base = safeName(title)
-            exportDir.listFiles()?.forEach { it.delete() }
-            when (format) {
-                ExportFormat.PDF -> listOf(File(exportDir, "$base.pdf").also { pdf.copyTo(it, overwrite = true) })
-                ExportFormat.TXT -> listOf(File(exportDir, "$base.txt").also { it.writeText(ocrText) })
-                ExportFormat.JPG -> renderPdf(pdf) { index, total, bmp ->
+    /** Thông báo cho người dùng sau lần xuất gần nhất (vd gợi ý bật AI Cloud), null nếu không có. */
+    @Volatile var lastNotice: String? = null
+        private set
+
+    suspend fun exportDocument(
+        repo: DocumentRepository,
+        id: String,
+        title: String,
+        ocrText: String,
+        format: ExportFormat,
+        pdfMode: PdfExportMode,
+        cloud: CloudConfig? = null,
+        onProgress: (Int, Int) -> Unit = { _, _ -> },
+    ): List<File> = withContext(Dispatchers.IO) {
+        lastNotice = null
+        val base = safeName(title)
+        exportDir.listFiles()?.forEach { it.delete() }
+        val masters = repo.getPageFiles(id)
+        val legacyPdf = repo.getPdfFile(id)
+        when (format) {
+            ExportFormat.PDF -> {
+                val out = File(exportDir, "${base}_${pdfMode.code}.pdf")
+                if (!repo.buildPdf(id, pdfMode, out, title)) legacyPdf.copyTo(out, overwrite = true)
+                listOf(out)
+            }
+            ExportFormat.TXT -> listOf(File(exportDir, "$base.txt").also { it.writeText(ocrText) })
+            ExportFormat.JPG -> {
+                val consumer: (Int, Int, Bitmap) -> File = { index, total, bmp ->
                     onProgress(index + 1, total)
+                    val shown = ScanFilters.renderBitmap(bmp, pdfMode, 4000)
                     val f = File(exportDir, if (total > 1) "${base}_trang${index + 1}.jpg" else "$base.jpg")
-                    f.outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 92, it) }
+                    f.outputStream().use { shown.compress(Bitmap.CompressFormat.JPEG, if (pdfMode == PdfExportMode.COLOR_SMALL || pdfMode == PdfExportMode.BW_SMALL) 75 else 92, it) }
+                    shown.recycle()
                     f
                 }
-                else -> listOf(convertPages(base, title, format, onProgress) { consumer -> renderPdf(pdf, consumer) })
+                if (masters.isNotEmpty()) forEachMaster(masters, consumer) else renderPdf(legacyPdf, consumer)
             }
+            else -> listOf(
+                convertPages(base, title, format, cloud, onProgress) { recognizer, consumer ->
+                    if (masters.isNotEmpty()) {
+                        forEachMaster(masters, consumer)
+                    } else {
+                        renderPdf(legacyPdf) { i, n, bmp -> withUpright(recognizer, bmp) { consumer(i, n, it) } }
+                    }
+                },
+            )
         }
+    }
 
     /** Công cụ "Chuyển đổi file": PDF hoặc ảnh import từ máy → Word/Excel/PowerPoint. */
-    suspend fun convertImported(uris: List<Uri>, title: String, format: ExportFormat, onProgress: (Int, Int) -> Unit = { _, _ -> }): File =
-        withContext(Dispatchers.IO) {
-            exportDir.listFiles()?.forEach { it.delete() }
-            val base = safeName(title)
-            val first = uris.first()
-            val isPdf = context.contentResolver.getType(first)?.contains("pdf") == true || first.toString().endsWith(".pdf", true)
-            if (isPdf) {
-                val tmp = File(context.cacheDir, "import_src.pdf")
-                context.contentResolver.openInputStream(first)?.use { input -> tmp.outputStream().use { input.copyTo(it) } }
-                    ?: error("Không đọc được file đã chọn")
-                try {
-                    convertPages(base, title, format, onProgress) { consumer -> renderPdf(tmp, consumer) }
-                } finally {
-                    tmp.delete()
+    suspend fun convertImported(
+        uris: List<Uri>,
+        title: String,
+        format: ExportFormat,
+        cloud: CloudConfig? = null,
+        onProgress: (Int, Int) -> Unit = { _, _ -> },
+    ): File = withContext(Dispatchers.IO) {
+        lastNotice = null
+        exportDir.listFiles()?.forEach { it.delete() }
+        val base = safeName(title)
+        val first = uris.first()
+        val isPdf = context.contentResolver.getType(first)?.contains("pdf") == true || first.toString().endsWith(".pdf", true)
+        if (isPdf) {
+            val tmp = File(context.cacheDir, "import_src.pdf")
+            context.contentResolver.openInputStream(first)?.use { input -> tmp.outputStream().use { input.copyTo(it) } }
+                ?: error("Không đọc được file đã chọn")
+            try {
+                convertPages(base, title, format, cloud, onProgress) { recognizer, consumer ->
+                    renderPdf(tmp) { i, n, bmp -> withUpright(recognizer, bmp) { consumer(i, n, it) } }
                 }
-            } else {
-                convertPages(base, title, format, onProgress) { consumer ->
-                    uris.mapIndexed { i, uri ->
-                        val bmp = decodeImage(uri) ?: error("Không đọc được ảnh ${i + 1}")
-                        try { consumer(i, uris.size, bmp) } finally { bmp.recycle() }
-                    }
+            } finally {
+                tmp.delete()
+            }
+        } else {
+            convertPages(base, title, format, cloud, onProgress) { recognizer, consumer ->
+                uris.mapIndexed { i, uri ->
+                    val bmp = decodeImage(uri) ?: error("Không đọc được ảnh ${i + 1}")
+                    try { withUpright(recognizer, bmp) { consumer(i, uris.size, it) } } finally { bmp.recycle() }
                 }
             }
         }
+    }
 
     private fun convertPages(
         base: String,
         title: String,
         format: ExportFormat,
+        cloud: CloudConfig?,
         onProgress: (Int, Int) -> Unit,
-        source: (consumer: (Int, Int, Bitmap) -> DocPage) -> List<DocPage>,
+        source: (TextRecognizer, (Int, Int, Bitmap) -> DocPage) -> List<DocPage>,
     ): File {
         val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
         try {
             val extractor = PageLayoutExtractor(recognizer)
-            val pages = source { index, total, bmp ->
+            val client = cloud?.let { CloudAiClient(it.apiKey, it.model) }
+            var lowConfidencePages = 0
+            val pages = source(recognizer) { index, total, bmp ->
                 onProgress(index + 1, total)
-                val input = kotlinx.coroutines.runBlocking { extractor.extract(bmp) }
-                LayoutAnalyzer.analyze(input)
+                val input = runBlocking { extractor.extract(bmp) }
+                val page = LayoutAnalyzer.analyze(input)
+                if (page.ocrConfidence < 0.75f) lowConfidencePages++
+                if (client != null) client.transcribe(page, bmp) else page
             }
             if (pages.isEmpty()) error("Không có trang nào để chuyển đổi")
+            if (client == null && lowConfidencePages > 0) {
+                lastNotice = "Có $lowConfidencePages trang chữ viết tay/khó đọc — bật \"AI Cloud\" khi xuất để nhận dạng chính xác."
+            }
             val doc = DocModel(title, pages)
             val out = File(exportDir, "$base.${format.ext}")
             out.outputStream().use { stream ->
@@ -106,6 +168,24 @@ class ExportManager(private val context: Context) {
         } finally {
             recognizer.close()
         }
+    }
+
+    private fun <T> forEachMaster(masters: List<File>, consumer: (Int, Int, Bitmap) -> T): List<T> =
+        masters.mapIndexed { i, f ->
+            val bmp = BitmapFactory.decodeFile(f.absolutePath) ?: error("Không đọc được ảnh trang ${i + 1}")
+            try { consumer(i, masters.size, bmp) } finally { bmp.recycle() }
+        }
+
+    /** Trang PDF/ảnh import có thể nằm ngang/ngược → xoay đúng chiều đọc trước khi phân tích. */
+    private fun <T> withUpright(recognizer: TextRecognizer, bmp: Bitmap, block: (Bitmap) -> T): T {
+        val rotation = runCatching {
+            val m = Mat()
+            Utils.bitmapToMat(bmp, m)
+            try { runBlocking { OrientationDetector.detect(recognizer, m) } } finally { m.release() }
+        }.getOrDefault(0)
+        if (rotation == 0) return block(bmp)
+        val rotated = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, Matrix().apply { postRotate(rotation.toFloat()) }, true)
+        try { return block(rotated) } finally { if (rotated !== bmp) rotated.recycle() }
     }
 
     /** Dựng từng trang PDF thành ảnh trắng nền (~200 DPI, cạnh dài ≤ 2339 px) rồi giải phóng ngay. */

@@ -26,21 +26,32 @@ data class Box(val left: Float, val top: Float, val right: Float, val bottom: Fl
     }
 }
 
-data class OcrWord(val text: String, val box: Box)
+/** [color] = màu mực RGB (0 = đen/không rõ), [confidence] = độ tin cậy OCR 0..1. */
+data class OcrWord(val text: String, val box: Box, val color: Int = 0, val confidence: Float = 1f)
 
 /**
  * [strokeWidth] = độ dày nét chữ trung bình (px, đo bằng distance transform trên ảnh nhị phân của dòng).
  * Chữ đậm có nét dày hơn rõ rệt so với mặt bằng chung của trang → dùng suy ra định dạng in đậm.
  */
-data class OcrLine(val text: String, val box: Box, val words: List<OcrWord>, val strokeWidth: Float = 0f)
+data class OcrLine(
+    val text: String,
+    val box: Box,
+    val words: List<OcrWord>,
+    val strokeWidth: Float = 0f,
+    val color: Int = 0,
+    val confidence: Float = 1f,
+)
 
 /** Đoạn đường kẻ (ngang hoặc dọc) tách được từ ảnh bằng morphology. */
 data class RuleSegment(val x1: Float, val y1: Float, val x2: Float, val y2: Float) {
     val isHorizontal: Boolean get() = kotlin.math.abs(x2 - x1) >= kotlin.math.abs(y2 - y1)
 }
 
-/** Vùng ảnh giữ nguyên (con dấu, chữ ký, logo, hình) đã cắt sẵn thành JPEG. */
-class Figure(val box: Box, val jpeg: ByteArray)
+/**
+ * Vùng ảnh giữ nguyên (con dấu, logo, hình minh hoạ) đã cắt sẵn thành JPEG. [isStamp] = vùng mực đỏ
+ * dạng tròn/vuông gọn (con dấu) → luôn giữ dạng ảnh dù bên trong có chữ.
+ */
+class Figure(val box: Box, val jpeg: ByteArray, val isStamp: Boolean = false)
 
 class PageInput(
     val width: Int,
@@ -68,6 +79,13 @@ data class Paragraph(
     val firstLineIndentPx: Float = 0f,
     /** Các dòng gốc trên ảnh (giữ nguyên vị trí từng dòng khi xuất PowerPoint / PDF có lớp chữ). */
     val lineBoxes: List<Box> = emptyList(),
+    /** Màu chữ RGB (0 = đen). Lấy mẫu từ màu mực thật: mực xanh/đỏ/tím giữ đúng màu. */
+    val color: Int = 0,
+    /**
+     * Ghi chú nằm cạnh bảng (lề phải/trái, cùng độ cao với bảng) → đặt tuyệt đối đúng vị trí
+     * (Word: khung định vị theo trang; Excel: ô cùng hàng bên cạnh bảng) thay vì xếp chồng lên trên bảng.
+     */
+    val floating: Boolean = false,
 )
 
 sealed class Block {
@@ -113,6 +131,10 @@ class DocPage(
     val pageJpeg: ByteArray?,
     /** Số điểm (pt) ứng với 1 pixel ảnh, giả định trang giấy A4. */
     val ptPerPx: Float,
-)
+    /** Độ tin cậy OCR trung bình (theo số ký tự) của trang; thấp (< 0,75) → thường là chữ viết tay. */
+    val ocrConfidence: Float = 1f,
+) {
+    val isLandscape: Boolean get() = width > height
+}
 
 class DocModel(val title: String, val pages: List<DocPage>)

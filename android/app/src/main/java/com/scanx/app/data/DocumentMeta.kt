@@ -15,4 +15,6 @@ data class DocumentMeta(
     val folderId: String? = null,
     val isTrashed: Boolean = false,
     val trashedAtEpochMillis: Long? = null,
+    /** Chế độ PDF đang lưu (A1/A2/B1/B2); null = tài liệu tạo từ bản cũ. */
+    val pdfMode: String? = null,
 )

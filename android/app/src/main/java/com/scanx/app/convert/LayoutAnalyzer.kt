@@ -27,7 +27,14 @@ object LayoutAnalyzer {
         val w = input.width.toFloat()
         val ptPerPx = (if (input.width <= input.height) 595f else 842f) / w
 
-        val grids = TableDetector.detect(input.rules, input.width, input.height)
+        // Lọc nét chữ (nhất là chữ viết tay: nét sổ "1", "k", ngoặc…) bị morphology nhận nhầm là đường
+        // kẻ: đường kẻ dọc thật dài ≥ 1,5 lần chiều cao dòng chữ, đường ngang thật ≥ 3 lần.
+        val medLineH = median(input.lines.map { it.box.height }) ?: 0f
+        val rules = if (medLineH <= 0f) input.rules else input.rules.filter { r ->
+            val len = if (r.isHorizontal) abs(r.x2 - r.x1) else abs(r.y2 - r.y1)
+            len >= medLineH * (if (r.isHorizontal) 3f else 1.5f)
+        }
+        val grids = TableDetector.detect(rules, input.width, input.height)
 
         // --- 1. Tách từ thuộc bảng / ngoài bảng ---------------------------------------------
         val cellWords = grids.map { HashMap<Int, MutableList<Pair<OcrWord, Float>>>() }
@@ -47,16 +54,29 @@ object LayoutAnalyzer {
             }
             if (rest.isNotEmpty()) {
                 val box = Box.unionOf(rest.map { it.box })!!
-                freeLines.add(OcrLine(rest.joinToString(" ") { it.text }, box, rest, line.strokeWidth))
+                freeLines.add(OcrLine(rest.joinToString(" ") { it.text }, box, rest, line.strokeWidth, line.color, line.confidence))
             }
         }
 
+        // Ghi chú cạnh bảng: dòng nằm ngoài bảng theo chiều ngang nhưng trong khoảng chiều cao của bảng
+        // (ghi chú lề, tổng cộng viết tay bên phải…) → đoạn định vị tuyệt đối, không chen vào dòng chảy.
+        val sideTol = w * 0.005f
+        val sideLines = freeLines.filter { l ->
+            grids.any { g ->
+                val b = g.box
+                l.box.cy > b.top && l.box.cy < b.bottom && (l.box.left >= b.right - sideTol || l.box.right <= b.left + sideTol)
+            }
+        }.toSet()
+        freeLines.removeAll(sideLines)
+
         val allLines = input.lines
+        val totalChars = allLines.sumOf { it.text.length }.coerceAtLeast(1)
+        val ocrConfidence = allLines.sumOf { (it.confidence * it.text.length).toDouble() }.toFloat() / totalChars
         val medianStroke = median(allLines.map { it.strokeWidth }.filter { it > 0f }) ?: 0f
         fun isBold(stroke: Float) = medianStroke > 0f && stroke > medianStroke * 1.15f
 
         val contentBox = Box.unionOf(
-            allLines.map { it.box } + grids.map { it.box } + input.figures.map { it.box },
+            allLines.map { it.box } + grids.map { it.box },
         ) ?: Box(0f, 0f, w, input.height.toFloat())
 
         // Lề phải "thực" của thân văn bản (bỏ qua header/ghi chú lấn lề): phân vị 90% mép phải các dòng dài.
@@ -121,8 +141,28 @@ object LayoutAnalyzer {
         }
         flushParagraphs()
 
-        // --- 4. Ảnh con dấu / chữ ký / logo --------------------------------------------------
-        for (f in input.figures) {
+        for (l in sideLines) {
+            blocks.add(ParagraphBlock(lineParagraph(l, l.box.left, l.box.right, ptPerPx, ::isBold, 0f).copy(align = Align.LEFT, indentPx = 0f, floating = true)))
+        }
+
+        // --- 4. Ảnh con dấu / logo / hình -------------------------------------------------------
+        // Bản Word/Excel phải là CHỮ thật: vùng màu chứa chữ (mực xanh/tím viết tay, bút dạ quang tô,
+        // khoanh tròn bằng bút màu) KHÔNG được cắt thành ảnh — chữ trong đó đã nằm trong đoạn văn/ô bảng.
+        // Chỉ giữ ảnh cho con dấu và vùng hình gần như không có chữ (logo, hình minh hoạ).
+        val keptFigures = input.figures.filter { f ->
+            if (f.isStamp) return@filter true
+            // Nét bút dạ/gạch chân màu dài mảnh: không phải hình.
+            val aspect = max(f.box.width, f.box.height) / max(1f, min(f.box.width, f.box.height))
+            if (aspect > 5f || min(f.box.width, f.box.height) < min(w, input.height.toFloat()) * 0.03f) return@filter false
+            val area = max(1f, f.box.width * f.box.height)
+            val textArea = allLines.sumOf { l ->
+                val ow = min(f.box.right, l.box.right) - max(f.box.left, l.box.left)
+                val oh = min(f.box.bottom, l.box.bottom) - max(f.box.top, l.box.top)
+                if (ow > 0 && oh > 0) (ow * oh).toDouble() else 0.0
+            }.toFloat()
+            textArea / area < 0.15f
+        }
+        for (f in keptFigures) {
             val align = when {
                 abs(f.box.cx - contentBox.cx) < w * 0.1f -> Align.CENTER
                 f.box.cx > contentBox.cx -> Align.RIGHT
@@ -136,6 +176,10 @@ object LayoutAnalyzer {
         val withSpacing = ArrayList<Block>(ordered.size)
         var prevBottom = contentBox.top
         for (b in ordered) {
+            if (b is ParagraphBlock && b.paragraph.floating) {
+                withSpacing.add(b)
+                continue
+            }
             val gap = max(0f, b.box.top - prevBottom)
             withSpacing.add(
                 when (b) {
@@ -146,7 +190,7 @@ object LayoutAnalyzer {
             )
             prevBottom = max(prevBottom, b.box.bottom)
         }
-        return DocPage(input.width, input.height, withSpacing, contentBox, input.pageJpeg, ptPerPx)
+        return DocPage(input.width, input.height, withSpacing, contentBox, input.pageJpeg, ptPerPx, ocrConfidence)
     }
 
     /** Gom dòng thành dải ngang; trong mỗi dải nối các mẩu sát nhau, tách các cụm cách xa (cột). */
@@ -158,7 +202,7 @@ object LayoutAnalyzer {
             val overlaps = band != null && band.any { o ->
                 o.box.verticalOverlap(l.box) >= 0.5f * min(o.box.height, l.box.height)
             }
-            if (overlaps) band!!.add(l) else bands.add(mutableListOf(l))
+            if (overlaps) band.add(l) else bands.add(mutableListOf(l))
         }
         return bands.map { band ->
             val byX = band.sortedBy { it.box.left }
@@ -169,6 +213,8 @@ object LayoutAnalyzer {
                     merged[merged.size - 1] = OcrLine(
                         last.text + " " + l.text, last.box.union(l.box), last.words + l.words,
                         (last.strokeWidth * last.box.width + l.strokeWidth * l.box.width) / max(1f, last.box.width + l.box.width),
+                        if (last.box.width >= l.box.width) last.color else l.color,
+                        min(last.confidence, l.confidence),
                     )
                 } else {
                     merged.add(l)
@@ -208,7 +254,7 @@ object LayoutAnalyzer {
         return Paragraph(
             text = l.text, align = align, fontPt = lineFont(l, ptPerPx), bold = isBold(l.strokeWidth),
             indentPx = if (align == Align.LEFT) max(0f, lg) else 0f, spaceBeforePx = 0f, box = l.box,
-            lineBoxes = listOf(l.box),
+            lineBoxes = listOf(l.box), color = l.color,
         )
     }
 
@@ -239,6 +285,7 @@ object LayoutAnalyzer {
                         box = box,
                         firstLineIndentPx = max(0f, first.box.left - restLeft).let { if (it > cw * 0.02f) it else 0f },
                         lineBoxes = group.map { it.box },
+                        color = majorityColor(group.map { it.color to it.text.length }),
                     ),
                 )
             }
@@ -287,7 +334,11 @@ object LayoutAnalyzer {
             val byX = r.sortedBy { it.first.box.left }
             val box = Box.unionOf(byX.map { it.first.box })!!
             val ink = byX.map { it.second }.average().toFloat()
-            OcrLine(byX.joinToString(" ") { it.first.text }, box, byX.map { it.first }, ink)
+            OcrLine(
+                byX.joinToString(" ") { it.first.text }, box, byX.map { it.first }, ink,
+                majorityColor(byX.map { it.first.color to it.first.text.length }),
+                byX.minOf { it.first.confidence },
+            )
         }
         val cw = max(1f, cell.width)
         val paras = ArrayList<Paragraph>()
@@ -304,14 +355,18 @@ object LayoutAnalyzer {
                 rg < 0.12f * cw && lg > 0.35f * cw -> Align.RIGHT
                 else -> Align.LEFT
             }
+            // Cỡ chữ trong ô không vượt quá ~62% chiều cao hàng (chữ viết tay to/nghiêng làm hộp OCR phình).
+            val cap = cell.height * ptPerPx * 0.62f / max(1, group.size)
+            val raw = median(group.map { lineFontRaw(it, ptPerPx) }) ?: fontRaw(medH, ptPerPx)
             paras.add(
                 Paragraph(
                     text = group.joinToString(" ") { it.text.trim() },
                     align = align,
-                    fontPt = snapSize(median(group.map { lineFontRaw(it, ptPerPx) }) ?: fontRaw(medH, ptPerPx)),
+                    fontPt = snapSize(min(raw, max(8f, cap))),
                     bold = group.count { isBold(it.strokeWidth) } * 2 > group.size,
                     indentPx = 0f, spaceBeforePx = 0f, box = box,
                     lineBoxes = group.map { it.box },
+                    color = majorityColor(group.map { it.color to it.text.length }),
                 ),
             )
             group = ArrayList()
@@ -348,7 +403,15 @@ object LayoutAnalyzer {
         val cellDom = dominant(cellParas.map { it.fontPt to it.text.length }) ?: bodyDom
         return blocks.map { b ->
             when (b) {
-                is ParagraphBlock -> ParagraphBlock(snap(b.paragraph, bodyDom))
+                is ParagraphBlock -> ParagraphBlock(
+                    if (b.paragraph.floating) {
+                        // Ghi chú cạnh bảng viết cùng cỡ với chữ trong bảng.
+                        val d = cellDom ?: bodyDom
+                        if (d != null && b.paragraph.fontPt > d) b.paragraph.copy(fontPt = d) else b.paragraph
+                    } else {
+                        snap(b.paragraph, bodyDom)
+                    },
+                )
                 is TableBlock -> TableBlock(
                     b.box, b.colEdges, b.rowEdges,
                     b.cells.map { c -> c.copy(paragraphs = c.paragraphs.map { snap(it, if (b.bordered) cellDom else bodyDom) }) },
@@ -358,6 +421,10 @@ object LayoutAnalyzer {
             }
         }
     }
+
+    /** Màu chiếm đa số (theo số ký tự); 0 = đen. */
+    private fun majorityColor(items: List<Pair<Int, Int>>): Int =
+        items.groupBy { it.first }.maxByOrNull { e -> e.value.sumOf { it.second } }?.key ?: 0
 
     /** Chiều cao hộp chữ OCR (px) → cỡ chữ (pt) thô. */
     private fun fontRaw(boxHeightPx: Float, ptPerPx: Float): Float = boxHeightPx * ptPerPx / 1.28f

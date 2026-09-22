@@ -71,6 +71,11 @@ import androidx.compose.ui.unit.dp
 import com.scanx.app.R
 import com.scanx.app.convert.ExportFormat
 import com.scanx.app.data.DocumentMeta
+import com.scanx.app.data.PdfExportMode
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Switch
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -87,10 +92,12 @@ fun DocumentDetailScreen(
     document: DocumentMeta,
     pdfFile: File,
     onBack: () -> Unit,
-    onExport: (ExportFormat, share: Boolean) -> Unit,
+    onExport: (ExportFormat, PdfExportMode, useCloud: Boolean, share: Boolean) -> Unit,
     onDelete: () -> Unit,
-    onComingSoon: () -> Unit,
+    cloudConfigured: Boolean,
+    onOpenCloudSettings: () -> Unit,
 ) {
+    val docMode = PdfExportMode.fromCode(document.pdfMode)
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showExportSheet by remember { mutableStateOf(false) }
     var tab by remember { mutableIntStateOf(0) }
@@ -103,7 +110,7 @@ fun DocumentDetailScreen(
                     IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, contentDescription = null) }
                 },
                 actions = {
-                    IconButton(onClick = { onExport(ExportFormat.PDF, true) }) {
+                    IconButton(onClick = { onExport(ExportFormat.PDF, docMode, false, true) }) {
                         Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.action_share))
                     }
                     IconButton(onClick = { showExportSheet = true }) {
@@ -137,9 +144,11 @@ fun DocumentDetailScreen(
 
     if (showExportSheet) {
         ExportSheet(
+            initialMode = docMode,
+            cloudConfigured = cloudConfigured,
             onDismiss = { showExportSheet = false },
-            onExport = { format, share -> showExportSheet = false; onExport(format, share) },
-            onComingSoon = { showExportSheet = false; onComingSoon() },
+            onExport = { format, mode, cloud, share -> showExportSheet = false; onExport(format, mode, cloud, share) },
+            onOpenCloudSettings = onOpenCloudSettings,
         )
     }
 
@@ -222,14 +231,19 @@ private fun PdfPage(file: File, index: Int) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ExportSheet(
+    initialMode: PdfExportMode,
+    cloudConfigured: Boolean,
     onDismiss: () -> Unit,
-    onExport: (ExportFormat, Boolean) -> Unit,
-    onComingSoon: () -> Unit,
+    onExport: (ExportFormat, PdfExportMode, Boolean, Boolean) -> Unit,
+    onOpenCloudSettings: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var selected by remember { mutableStateOf(ExportFormat.PDF) }
+    var mode by remember { mutableStateOf(initialMode) }
+    var useCloud by remember { mutableStateOf(false) }
     val options: List<Triple<ExportFormat, ImageVector, Int>> = listOf(
         Triple(ExportFormat.PDF, Icons.Filled.PictureAsPdf, R.string.export_desc_pdf),
         Triple(ExportFormat.DOCX, Icons.Filled.Description, R.string.export_desc_docx),
@@ -238,8 +252,9 @@ private fun ExportSheet(
         Triple(ExportFormat.JPG, Icons.Filled.Image, R.string.export_desc_jpg),
         Triple(ExportFormat.TXT, Icons.Filled.TextSnippet, R.string.export_desc_txt),
     )
+    val isOffice = selected == ExportFormat.DOCX || selected == ExportFormat.XLSX || selected == ExportFormat.PPTX
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
-        Column(modifier = Modifier.padding(bottom = 24.dp)) {
+        Column(modifier = Modifier.padding(bottom = 24.dp).verticalScroll(rememberScrollState())) {
             Text(
                 stringResource(R.string.export_title),
                 style = MaterialTheme.typography.titleMedium,
@@ -250,7 +265,7 @@ private fun ExportSheet(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { selected = format }
-                        .padding(horizontal = 20.dp, vertical = 10.dp),
+                        .padding(horizontal = 20.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
@@ -262,25 +277,64 @@ private fun ExportSheet(
                 }
             }
             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth().clickable(onClick = onComingSoon).padding(horizontal = 20.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Filled.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
-                Column(modifier = Modifier.weight(1f).padding(start = 16.dp)) {
-                    Text(stringResource(R.string.export_cloud_ai), style = MaterialTheme.typography.bodyLarge)
-                    Text(stringResource(R.string.export_cloud_ai_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (selected == ExportFormat.PDF || selected == ExportFormat.JPG) {
+                // 2 kiểu scan × 2 mức chất lượng.
+                Text(
+                    stringResource(R.string.export_mode_title),
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+                )
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    for (m in PdfExportMode.values()) {
+                        FilterChip(
+                            selected = mode == m,
+                            onClick = { mode = m },
+                            label = { Text("${m.code} · ${m.label}") },
+                        )
+                    }
                 }
-                Icon(Icons.Filled.Lock, contentDescription = stringResource(R.string.coming_soon_badge), tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(18.dp))
+                Text(
+                    mode.description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+                )
+            }
+            if (isOffice) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { if (cloudConfigured) useCloud = !useCloud else onOpenCloudSettings() }
+                        .padding(horizontal = 20.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
+                    Column(modifier = Modifier.weight(1f).padding(start = 16.dp)) {
+                        Text(stringResource(R.string.export_cloud_ai), style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            stringResource(if (cloudConfigured) R.string.export_cloud_ai_desc else R.string.export_cloud_ai_setup),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (cloudConfigured) {
+                        Switch(checked = useCloud, onCheckedChange = { useCloud = it })
+                    } else {
+                        Icon(Icons.Filled.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(18.dp))
+                    }
+                }
             }
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
-                OutlinedButton(onClick = { onExport(selected, true) }, modifier = Modifier.weight(1f)) {
+                OutlinedButton(onClick = { onExport(selected, mode, useCloud && isOffice, true) }, modifier = Modifier.weight(1f)) {
                     Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                     Text(stringResource(R.string.action_share))
                 }
                 Spacer(Modifier.width(12.dp))
-                Button(onClick = { onExport(selected, false) }, modifier = Modifier.weight(1f)) {
+                Button(onClick = { onExport(selected, mode, useCloud && isOffice, false) }, modifier = Modifier.weight(1f)) {
                     Icon(Icons.Filled.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                     Text(stringResource(R.string.export_save))

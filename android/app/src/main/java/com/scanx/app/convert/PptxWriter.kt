@@ -118,10 +118,10 @@ object PptxWriter {
 
     private fun algn(a: Align) = when (a) { Align.LEFT -> "l"; Align.CENTER -> "ctr"; Align.RIGHT -> "r"; Align.JUSTIFY -> "just" }
 
-    private fun runXml(p: Paragraph): String {
-        val sz = (p.fontPt * 100).roundToInt().coerceIn(100, 400000)
+    private fun runXml(p: Paragraph, sizePt: Float = p.fontPt): String {
+        val sz = (sizePt * 100).roundToInt().coerceIn(100, 400000)
         return "<a:p><a:pPr algn=\"${algn(p.align)}\"/><a:r><a:rPr lang=\"vi-VN\" sz=\"$sz\"" + (if (p.bold) " b=\"1\"" else "") + " dirty=\"0\">" +
-            "<a:solidFill><a:srgbClr val=\"000000\"/></a:solidFill><a:latin typeface=\"$DEFAULT_FONT\"/><a:cs typeface=\"$DEFAULT_FONT\"/></a:rPr>" +
+            "<a:solidFill><a:srgbClr val=\"${String.format(java.util.Locale.US, "%06X", p.color and 0xFFFFFF)}\"/></a:solidFill><a:latin typeface=\"$DEFAULT_FONT\"/><a:cs typeface=\"$DEFAULT_FONT\"/></a:rPr>" +
             "<a:t>${xmlEscape(p.text)}</a:t></a:r></a:p>"
     }
 
@@ -129,7 +129,7 @@ object PptxWriter {
         val w = min(max(cx, 1), max(1, slideCx - x))
         return "<p:sp><p:nvSpPr><p:cNvPr id=\"$id\" name=\"Text $id\"/><p:cNvSpPr txBox=\"1\"/><p:nvPr/></p:nvSpPr>" +
             "<p:spPr><a:xfrm><a:off x=\"$x\" y=\"$y\"/><a:ext cx=\"$w\" cy=\"${max(cy, 1)}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>" +
-            "<p:txBody><a:bodyPr wrap=\"square\" lIns=\"0\" tIns=\"0\" rIns=\"0\" bIns=\"0\" rtlCol=\"0\" anchor=\"t\"><a:noAutofit/></a:bodyPr><a:lstStyle/>" +
+            "<p:txBody><a:bodyPr wrap=\"${if (p.floating) "none" else "square"}\" lIns=\"0\" tIns=\"0\" rIns=\"0\" bIns=\"0\" rtlCol=\"0\" anchor=\"t\"><a:noAutofit/></a:bodyPr><a:lstStyle/>" +
             runXml(p) + "</p:txBody></p:sp>"
     }
 
@@ -142,6 +142,10 @@ object PptxWriter {
         fun tcPr(anchor: String) = "<a:tcPr marL=\"45720\" marR=\"45720\" marT=\"0\" marB=\"0\" anchor=\"$anchor\">" +
             "<a:lnL $line</a:lnL><a:lnR $line</a:lnR><a:lnT $line</a:lnT><a:lnB $line</a:lnB><a:noFill/></a:tcPr>"
         val emptyBody = "<a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang=\"vi-VN\" sz=\"1000\" dirty=\"0\"/></a:p></a:txBody>"
+        // Cỡ chữ đồng nhất cho chữ thường trong bảng (trung vị), vừa hàng thấp nhất (~2 dòng).
+        val fonts = t.cells.flatMap { c -> c.paragraphs.filter { !it.bold }.map { it.fontPt } }.sorted()
+        val minRowPt = rowH.minOrNull()?.let { it / 12700f } ?: 20f
+        val uniform = if (fonts.isEmpty()) 12f else min(fonts[fonts.size / 2], max(7f, minRowPt * 0.45f))
 
         val sb = StringBuilder()
         sb.append("<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id=\"$id\" name=\"Table $id\"/><p:cNvGraphicFramePr><a:graphicFrameLocks noGrp=\"1\"/></p:cNvGraphicFramePr><p:nvPr/></p:nvGraphicFramePr>")
@@ -158,7 +162,7 @@ object PptxWriter {
                 if (cell.row == r && cell.col == c) {
                     val attrs = (if (cell.colSpan > 1) " gridSpan=\"${cell.colSpan}\"" else "") + (if (cell.rowSpan > 1) " rowSpan=\"${cell.rowSpan}\"" else "")
                     val body = if (cell.paragraphs.isEmpty()) emptyBody
-                    else "<a:txBody><a:bodyPr/><a:lstStyle/>" + cell.paragraphs.joinToString("") { runXml(it) } + "</a:txBody>"
+                    else "<a:txBody><a:bodyPr/><a:lstStyle/>" + cell.paragraphs.joinToString("") { runXml(it, if (it.bold) min(it.fontPt, minRowPt * 0.6f) else uniform) } + "</a:txBody>"
                     sb.append("<a:tc$attrs>$body${tcPr(anchor)}</a:tc>")
                 } else {
                     val attrs = (if (c > cell.col) " hMerge=\"1\"" else "") + (if (r > cell.row) " vMerge=\"1\"" else "")

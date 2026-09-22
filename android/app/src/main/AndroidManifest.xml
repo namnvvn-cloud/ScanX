@@ -3,6 +3,8 @@
 
     <uses-feature android:name="android.hardware.camera" android:required="true" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Chỉ dùng cho tính năng AI Cloud (tuỳ chọn, người dùng tự nhập API key) -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:name=".ScanXApp"

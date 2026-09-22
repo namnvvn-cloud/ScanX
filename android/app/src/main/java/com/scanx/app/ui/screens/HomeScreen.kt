@@ -719,7 +719,7 @@ private fun ToolsBottomSheet(
                 horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
                 ToolItem(Icons.Filled.SwapHoriz, stringResource(R.string.tools_convert_office), locked = false, onClick = onConvertClick)
-                ToolItem(Icons.Filled.AutoAwesome, stringResource(R.string.tools_convert_cloud), locked = true, onClick = onComingSoon)
+                ToolItem(Icons.Filled.AutoAwesome, stringResource(R.string.tools_convert_cloud), locked = false, onClick = onConvertClick)
                 Spacer(Modifier.width(76.dp))
                 Spacer(Modifier.width(76.dp))
             }

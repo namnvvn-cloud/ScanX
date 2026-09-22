@@ -22,7 +22,7 @@ class AppPreferences(context: Context) {
         }.getOrDefault(CaptureMode.AUTO)
         set(value) = prefs.edit().putString(KEY_CAPTURE_MODE, value.name).apply()
 
-    /** Độ nhạy tự chụp: số khung hình liên tiếp khung tài liệu phải đứng yên trước khi tự bấm chụp. */
+    /** Độ nhạy tự chụp: số nấc × 0,1 s tài liệu phải đứng yên trước khi tự chụp (mặc định 7 = 0,7 s). */
     var autoCaptureStableFrames: Int
         get() = prefs.getInt(KEY_STABLE_FRAMES, DEFAULT_STABLE_FRAMES)
         set(value) = prefs.edit().putInt(KEY_STABLE_FRAMES, value.coerceIn(3, 15)).apply()
@@ -34,6 +34,15 @@ class AppPreferences(context: Context) {
     var flashEnabled: Boolean
         get() = prefs.getBoolean(KEY_FLASH, false)
         set(value) = prefs.edit().putBoolean(KEY_FLASH, value).apply()
+
+    /** API key Anthropic của người dùng cho "AI Cloud" (chỉ lưu trong bộ nhớ riêng của app trên máy). */
+    var cloudApiKey: String
+        get() = prefs.getString(KEY_CLOUD_KEY, "").orEmpty()
+        set(value) = prefs.edit().putString(KEY_CLOUD_KEY, value.trim()).apply()
+
+    var cloudModel: String
+        get() = prefs.getString(KEY_CLOUD_MODEL, "claude-sonnet-5").orEmpty().ifBlank { "claude-sonnet-5" }
+        set(value) = prefs.edit().putString(KEY_CLOUD_MODEL, value).apply()
 
     var sortOrder: SortOrder
         get() = runCatching {
@@ -54,6 +63,8 @@ class AppPreferences(context: Context) {
         private const val KEY_FLASH = "flash_enabled"
         private const val KEY_SORT = "sort_order"
         private const val KEY_VIEW_MODE = "view_mode"
-        const val DEFAULT_STABLE_FRAMES = 6
+        private const val KEY_CLOUD_KEY = "cloud_api_key"
+        private const val KEY_CLOUD_MODEL = "cloud_model"
+        const val DEFAULT_STABLE_FRAMES = 7
     }
 }

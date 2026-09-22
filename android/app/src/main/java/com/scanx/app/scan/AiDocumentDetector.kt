@@ -198,32 +198,78 @@ object AiDocumentDetector {
     }
 
     /**
-     * "Chữ ký" nội dung trang: vùng tài liệu làm phẳng về 24×32 ảnh xám, chuẩn hoá trừ trung bình.
-     * Dùng để nhận biết đã lật sang trang mới (khác chữ ký trang vừa chụp) và chống chụp trùng.
+     * "Chữ ký" nội dung trang: vùng tài liệu làm phẳng về 48×64 ảnh xám rồi lọc thông cao (trừ nền
+     * mờ Gauss σ=6) → chỉ còn nét chữ/đường kẻ, không phụ thuộc ánh sáng/bóng đổ. So 2 chữ ký bằng
+     * tương quan Pearson ([pageSimilarity]). Kiểm thử trên 9 ảnh chụp trùng 1 trang thật (có tay che,
+     * lệch khung): tương quan 0,36–0,98; giữa các trang khác nhau: ≤ 0,15.
      */
     fun pageSignature(bgrUpright: Mat, quad: DetectedQuad): FloatArray {
         val w = bgrUpright.cols().toDouble()
         val h = bgrUpright.rows().toDouble()
         val src = MatOfPoint2f(*quad.points.map { Point(it.x * w, it.y * h) }.toTypedArray())
-        val dst = MatOfPoint2f(Point(0.0, 0.0), Point(23.0, 0.0), Point(23.0, 31.0), Point(0.0, 31.0))
+        val dst = MatOfPoint2f(
+            Point(0.0, 0.0), Point(SIG_W - 1.0, 0.0), Point(SIG_W - 1.0, SIG_H - 1.0), Point(0.0, SIG_H - 1.0),
+        )
         val m = Imgproc.getPerspectiveTransform(src, dst)
         val warped = Mat()
-        Imgproc.warpPerspective(bgrUpright, warped, m, Size(24.0, 32.0))
+        Imgproc.warpPerspective(bgrUpright, warped, m, Size(SIG_W.toDouble(), SIG_H.toDouble()), Imgproc.INTER_AREA)
         val gray = Mat()
         Imgproc.cvtColor(warped, gray, Imgproc.COLOR_BGR2GRAY)
-        val bytes = ByteArray(24 * 32)
-        gray.get(0, 0, bytes)
+        val sig = signatureFromGray(gray)
         src.release(); dst.release(); m.release(); warped.release(); gray.release()
-        val values = FloatArray(bytes.size) { (bytes[it].toInt() and 0xFF) / 255f }
-        val mean = values.average().toFloat()
-        for (i in values.indices) values[i] -= mean
-        return values
+        return sig
     }
 
-    fun signatureDistance(a: FloatArray, b: FloatArray): Float {
-        if (a.size != b.size) return 1f
-        var s = 0f
-        for (i in a.indices) s += abs(a[i] - b[i])
-        return s / a.size
+    /** Chữ ký của 1 ảnh trang đã làm phẳng (xám, kích thước bất kỳ) — dùng kiểm tra trùng sau khi chụp. */
+    fun signatureFromGray(gray: Mat): FloatArray {
+        val small = Mat()
+        if (gray.cols() != SIG_W || gray.rows() != SIG_H) {
+            Imgproc.resize(gray, small, Size(SIG_W.toDouble(), SIG_H.toDouble()), 0.0, 0.0, Imgproc.INTER_AREA)
+        } else {
+            gray.copyTo(small)
+        }
+        val f = Mat()
+        small.convertTo(f, org.opencv.core.CvType.CV_32F, 1.0 / 255.0)
+        val bg = Mat()
+        Imgproc.GaussianBlur(f, bg, Size(0.0, 0.0), 6.0)
+        Core.subtract(f, bg, f)
+        val out = FloatArray(SIG_W * SIG_H)
+        f.get(0, 0, out)
+        small.release(); f.release(); bg.release()
+        return out
     }
+
+    /** Độ "có nội dung" của trang (độ lệch chuẩn chữ ký): ≈ 0 với giấy trắng, ≥ 0,03 khi có chữ. */
+    fun signatureTexture(sig: FloatArray): Float {
+        var mean = 0.0
+        for (v in sig) mean += v
+        mean /= sig.size
+        var s = 0.0
+        for (v in sig) s += (v - mean) * (v - mean)
+        return kotlin.math.sqrt(s / sig.size).toFloat()
+    }
+
+    /**
+     * Độ giống nhau của 2 trang, -1..1. Trang trắng/ít nội dung được xử lý riêng: 2 trang cùng trắng
+     * → 1 (coi như giống, chỉ phân biệt được nhờ rút giấy ra/đổi vị trí); 1 trắng 1 có chữ → 0.
+     */
+    fun pageSimilarity(a: FloatArray, b: FloatArray): Float {
+        if (a.size != b.size) return 0f
+        val sa = signatureTexture(a)
+        val sb = signatureTexture(b)
+        if (sa < BLANK_TEXTURE && sb < BLANK_TEXTURE) return 1f
+        if (minOf(sa, sb) < BLANK_TEXTURE && maxOf(sa, sb) > BLANK_TEXTURE * 1.7f) return 0f
+        var ma = 0.0
+        var mb = 0.0
+        for (i in a.indices) { ma += a[i]; mb += b[i] }
+        ma /= a.size; mb /= b.size
+        var cov = 0.0
+        for (i in a.indices) cov += (a[i] - ma) * (b[i] - mb)
+        cov /= a.size
+        return (cov / (sa.toDouble() * sb + 1e-6)).toFloat()
+    }
+
+    const val SIG_W = 48
+    const val SIG_H = 64
+    const val BLANK_TEXTURE = 0.012f
 }

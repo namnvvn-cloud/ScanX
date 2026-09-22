@@ -42,94 +42,153 @@ fun maxCornerDistance(a: DetectedQuad, b: DetectedQuad): Float {
 }
 
 /**
- * Máy trạng thái tự động chụp, theo THỜI GIAN giữ yên (không đếm số khung như bản cũ → không phụ
- * thuộc tốc độ máy):
+ * Máy trạng thái tự chụp — nhịp kiểu Scanner Pro: chỉ chụp khi trang ĐỦ ĐIỀU KIỆN và LÀ TRANG MỚI.
  *
- * 1. Tài liệu được AI nhận diện với độ tin cậy đủ cao (ảnh nét, đủ sáng).
- * 2. 4 góc giữ yên trong phạm vi [stillTolerance] liên tục đủ [holdMillis] → chụp.
- * 3. Sau khi chụp, chỉ cho chụp tiếp khi phát hiện ĐÃ LẬT TRANG: nội dung trang khác trang vừa
- *    chụp (chữ ký ảnh khác), hoặc có xáo trộn rõ (mất khung/tay che/giấy dịch chuyển mạnh).
- *    → Lật trang là tự chụp trang mới, không cần bấm, và không bao giờ chụp trùng 1 trang 2 lần.
+ * Điều kiện chụp (tất cả phải đạt liên tục trong [holdMillis], mặc định 0,7 s):
+ *  1. AI thấy đủ 4 góc với độ tin cậy ≥ [minConfidence]; cả 4 góc cách mép khung ≥ [edgeMargin]
+ *     (không bị cắt mất góc giấy) và trang chiếm 12–97% khung.
+ *  2. 4 góc đứng yên trong [stillTolerance]; nội dung trang không đổi giữa các khung (không có tay
+ *     đang lướt qua, không rung) — so bằng chữ ký nội dung [AiDocumentDetector.pageSimilarity].
+ *  3. Độ nét ở thời điểm chụp ≥ 80% độ nét tốt nhất đã thấy trong lúc giữ (tránh chụp khung nhoè).
+ *
+ * Chống chụp trùng: sau mỗi lần chụp, trang chỉ được coi là "mới" khi:
+ *  - nội dung khác hẳn trang vừa chụp (tương quan < [newPageSimilarity]); hoặc
+ *  - tài liệu đã rời khỏi khung ≥ [removedMillis] (rút giấy ra, đặt tờ khác vào) VÀ tờ mới không
+ *    giống hệt tờ cũ (tương quan < [samePageSimilarity]); trang trắng thì chỉ cần rút ra/đặt lại.
+ *  Tay che, rung, mất khung chớp nhoáng KHÔNG còn làm chụp lại trang cũ như bản trước.
  */
 class AutoCaptureController(
-    var holdMillis: Long = 240L,
-    private val minConfidence: Float = 0.55f,
-    private val stillTolerance: Float = 0.025f,
-    private val newPageSignatureDistance: Float = 0.07f,
-    private val disruptionDistance: Float = 0.08f,
-    private val minIntervalMillis: Long = 400L,
-    /** Ảnh rất nét (AI tin cậy ≥ 0,8) → chỉ cần giữ yên 60% thời gian cấu hình. */
-    private val highConfidence: Float = 0.8f,
-    private val highConfidenceHoldFactor: Float = 0.6f,
+    var holdMillis: Long = 700L,
+    private val minConfidence: Float = 0.5f,
+    private val stillTolerance: Float = 0.02f,
+    private val edgeMargin: Float = 0.012f,
+    private val newPageSimilarity: Float = 0.3f,
+    private val samePageSimilarity: Float = 0.85f,
+    private val removedMillis: Long = 700L,
+    private val minIntervalMillis: Long = 900L,
+    private val contentStableSimilarity: Float = 0.75f,
+    private val sharpnessKeep: Float = 0.8f,
 ) {
-    data class Decision(val progress: Float, val shouldCapture: Boolean, val waitingForNewPage: Boolean)
+    enum class Hint { NONE, NO_DOCUMENT, EDGE, HOLD_STILL, WAIT_NEW_PAGE }
+
+    data class Decision(
+        val progress: Float,
+        val shouldCapture: Boolean,
+        val waitingForNewPage: Boolean,
+        val hint: Hint,
+        /** true = vừa bắt đầu giữ yên trên trang mới → nên lấy nét vào tâm tài liệu. */
+        val holdStarted: Boolean = false,
+    )
 
     private var anchor: DetectedQuad? = null
     private var holdStart = 0L
+    private var holdMaxTexture = 0f
+    private var prevSignature: FloatArray? = null
+
     private var lastCaptureAt = 0L
+    private var lastCapturedSignature: FloatArray? = null
     private var lastCapturedQuad: DetectedQuad? = null
-    private var lastSignature: FloatArray? = null
-    private var needNewPage = false
-    private var missedFrames = 0
+    private var absentSince = 0L
+    private var removedSinceCapture = false
+
+    /** Lý do cho phép chụp của lần chụp gần nhất: true = do tài liệu đã được rút ra/đặt lại. */
+    var lastCaptureAfterRemoval = false
+        private set
 
     fun onFrame(quad: DetectedQuad?, signature: FloatArray?, nowMillis: Long): Decision {
+        val waiting = lastCapturedSignature != null
         if (quad == null || quad.confidence < minConfidence) {
-            anchor = null
-            missedFrames++
-            if (needNewPage && missedFrames >= 2) needNewPage = false
-            return Decision(0f, false, needNewPage)
+            resetHold()
+            if (absentSince == 0L) absentSince = nowMillis
+            if (waiting && nowMillis - absentSince >= removedMillis) removedSinceCapture = true
+            return Decision(0f, false, waiting && !removedSinceCapture, if (waiting && !removedSinceCapture) Hint.WAIT_NEW_PAGE else Hint.NO_DOCUMENT)
         }
-        missedFrames = 0
+        absentSince = 0L
 
-        if (needNewPage) {
-            val last = lastCapturedQuad
-            val moved = last != null && maxCornerDistance(last, quad) > disruptionDistance
-            val sigA = lastSignature
-            val changed = sigA != null && signature != null &&
-                AiDocumentDetector.signatureDistance(sigA, signature) > newPageSignatureDistance
-            if (moved || changed) {
-                needNewPage = false
-                anchor = null
-            } else {
-                return Decision(0f, false, true)
-            }
+        if (!isFullyInside(quad)) {
+            resetHold()
+            return Decision(0f, false, false, Hint.EDGE)
         }
+
+        if (!isNewPage(quad, signature)) {
+            resetHold()
+            return Decision(0f, false, true, Hint.WAIT_NEW_PAGE)
+        }
+
+        val texture = signature?.let { AiDocumentDetector.signatureTexture(it) } ?: 0f
+        val prevSig = prevSignature
+        val contentMoving = prevSig != null && signature != null &&
+            texture > 0.02f && AiDocumentDetector.signatureTexture(prevSig) > 0.02f &&
+            AiDocumentDetector.pageSimilarity(prevSig, signature) < contentStableSimilarity
+        prevSignature = signature
 
         val a = anchor
-        if (a == null || maxCornerDistance(a, quad) > stillTolerance) {
+        if (a == null || maxCornerDistance(a, quad) > stillTolerance || contentMoving) {
             anchor = quad
             holdStart = nowMillis
-            return Decision(0f, false, false)
+            holdMaxTexture = texture
+            return Decision(0f, false, false, Hint.HOLD_STILL, holdStarted = true)
         }
+        if (texture > holdMaxTexture) holdMaxTexture = texture
 
-        val effectiveHold = if (quad.confidence >= highConfidence) {
-            (holdMillis * highConfidenceHoldFactor).toLong()
-        } else {
-            holdMillis
-        }.coerceAtLeast(80L)
-        val progress = ((nowMillis - holdStart).toFloat() / effectiveHold).coerceIn(0f, 1f)
-        if (progress >= 1f && nowMillis - lastCaptureAt >= minIntervalMillis) {
+        val progress = ((nowMillis - holdStart).toFloat() / holdMillis.coerceAtLeast(200L)).coerceIn(0f, 1f)
+        val sharpEnough = holdMaxTexture < AiDocumentDetector.BLANK_TEXTURE * 2 || texture >= holdMaxTexture * sharpnessKeep
+        if (progress >= 1f && sharpEnough && nowMillis - lastCaptureAt >= minIntervalMillis) {
             markCaptured(quad, signature, nowMillis)
-            return Decision(1f, true, false)
+            return Decision(1f, true, false, Hint.NONE)
         }
-        return Decision(progress, false, false)
+        return Decision(progress, false, false, Hint.HOLD_STILL)
+    }
+
+    private fun isFullyInside(q: DetectedQuad): Boolean {
+        if (q.areaRatio < 0.12f || q.areaRatio > 0.97f) return false
+        return q.points.all { it.x >= edgeMargin && it.x <= 1f - edgeMargin && it.y >= edgeMargin && it.y <= 1f - edgeMargin }
+    }
+
+    private fun isNewPage(quad: DetectedQuad, signature: FloatArray?): Boolean {
+        val last = lastCapturedSignature ?: return true
+        if (signature == null) return removedSinceCapture
+        val sim = AiDocumentDetector.pageSimilarity(last, signature)
+        val bothBlank = AiDocumentDetector.signatureTexture(last) < AiDocumentDetector.BLANK_TEXTURE &&
+            AiDocumentDetector.signatureTexture(signature) < AiDocumentDetector.BLANK_TEXTURE
+        if (bothBlank) {
+            // Trang trắng: không so được nội dung → chỉ nhận là trang mới khi đã rút giấy ra, hoặc
+            // tờ giấy nằm ở vị trí khác hẳn (đặt tờ mới lệch chỗ tờ cũ).
+            val moved = lastCapturedQuad?.let { maxCornerDistance(it, quad) > 0.15f } ?: true
+            return removedSinceCapture || moved
+        }
+        if (sim < newPageSimilarity) return true
+        return removedSinceCapture && sim < samePageSimilarity
+    }
+
+    private fun resetHold() {
+        anchor = null
+        prevSignature = null
+        holdMaxTexture = 0f
     }
 
     /** Gọi cả khi chụp thủ công để chế độ tự động không chụp lại đúng trang vừa chụp tay. */
     fun markCaptured(quad: DetectedQuad?, signature: FloatArray?, nowMillis: Long) {
+        lastCaptureAfterRemoval = removedSinceCapture && lastCapturedSignature != null
         lastCaptureAt = nowMillis
         lastCapturedQuad = quad
-        lastSignature = signature
-        needNewPage = true
-        anchor = null
-        missedFrames = 0
+        lastCapturedSignature = signature
+        removedSinceCapture = false
+        absentSince = 0L
+        resetHold()
+    }
+
+    /** Trang vừa chụp bị loại (trùng/lỗi) → cập nhật mốc so sánh nhưng không coi là đã rút giấy. */
+    fun rememberPage(signature: FloatArray?) {
+        if (signature != null) lastCapturedSignature = signature
     }
 
     fun reset() {
-        anchor = null
-        needNewPage = false
-        lastSignature = null
+        resetHold()
+        lastCapturedSignature = null
         lastCapturedQuad = null
-        missedFrames = 0
+        removedSinceCapture = false
+        absentSince = 0L
+        lastCaptureAfterRemoval = false
     }
 }

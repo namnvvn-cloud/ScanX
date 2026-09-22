@@ -17,7 +17,7 @@ object XlsxWriter {
 
     private class CellData(val text: String, val style: Int)
     private data class StyleKey(val fontId: Int, val border: Int, val h: String, val v: String, val indent: Int)
-    private data class FontKey(val size: Float, val bold: Boolean)
+    private data class FontKey(val size: Float, val bold: Boolean, val color: Int = 0)
 
     private val NUMBER_VN = Regex("^-?\\d{1,3}(\\.\\d{3})+(,\\d+)?$|^-?\\d+(,\\d+)?$")
 
@@ -25,13 +25,13 @@ object XlsxWriter {
         val pkg = OoxmlPackage()
         val fonts = LinkedHashMap<FontKey, Int>()
         val styles = LinkedHashMap<StyleKey, Int>()
-        fun fontId(size: Float, bold: Boolean) = fonts.getOrPut(FontKey(size, bold)) { fonts.size }
-        fontId(12f, false) // font 0 mặc định
+        fun fontId(size: Float, bold: Boolean, color: Int) = fonts.getOrPut(FontKey(size, bold, color)) { fonts.size }
+        fontId(12f, false, 0) // font 0 mặc định
         styles[StyleKey(0, 0, "general", "bottom", 0)] = 0
-        fun styleId(size: Float, bold: Boolean, border: Boolean, align: Align, vAlign: VAlign, indent: Int): Int {
+        fun styleId(size: Float, bold: Boolean, color: Int, border: Boolean, align: Align, vAlign: VAlign, indent: Int): Int {
             val h = when (align) { Align.LEFT -> "left"; Align.CENTER -> "center"; Align.RIGHT -> "right"; Align.JUSTIFY -> "justify" }
             val v = when (vAlign) { VAlign.TOP -> "top"; VAlign.CENTER -> "center"; VAlign.BOTTOM -> "bottom" }
-            return styles.getOrPut(StyleKey(fontId(size, bold), if (border) 1 else 0, h, v, indent)) { styles.size }
+            return styles.getOrPut(StyleKey(fontId(size, bold, color), if (border) 1 else 0, h, v, indent)) { styles.size }
         }
 
         val sheetNames = ArrayList<String>()
@@ -71,13 +71,15 @@ object XlsxWriter {
         pkg.writeTo(out)
     }
 
-    private fun sheetXml(page: DocPage, styleId: (Float, Boolean, Boolean, Align, VAlign, Int) -> Int): String {
+    private fun sheetXml(page: DocPage, styleId: (Float, Boolean, Int, Boolean, Align, VAlign, Int) -> Int): String {
         val pt = page.ptPerPx
         // --- Lưới cột chủ -------------------------------------------------------------------
         val rawEdges = ArrayList<Float>()
         rawEdges.add(page.content.left)
         rawEdges.add(page.content.right)
         page.blocks.filterIsInstance<TableBlock>().forEach { rawEdges.addAll(it.colEdges) }
+        val floats = page.blocks.filterIsInstance<ParagraphBlock>().map { it.paragraph }.filter { it.floating }
+        floats.forEach { rawEdges.add(it.box.left); rawEdges.add(it.box.right) }
         val tol = page.width * 0.012f
         val edges = ArrayList<Float>()
         for (e in rawEdges.sorted()) if (edges.isEmpty() || e - edges.last() > tol) edges.add(e) else edges[edges.size - 1] = (edges.last() + e) / 2f
@@ -100,7 +102,10 @@ object XlsxWriter {
             if (r1 > r0 || c1 > c0) merges.add("${ref(r0, c0)}:${ref(r1, c1)}")
         }
 
+        // Vị trí các bảng đã đặt (hàng bắt đầu) để gắn ghi chú cạnh bảng vào đúng hàng.
+        val tablePlacements = ArrayList<Pair<TableBlock, Int>>()
         for (block in page.blocks) {
+            if (block is ParagraphBlock && block.paragraph.floating) continue
             val gapPt = when (block) {
                 is ParagraphBlock -> block.paragraph.spaceBeforePx
                 is TableBlock -> block.spaceBeforePx
@@ -113,12 +118,17 @@ object XlsxWriter {
                     val indent = (p.indentPx * pt / 9f).roundToInt().coerceIn(0, 15)
                     val align = if (p.align == Align.JUSTIFY) Align.LEFT else p.align
                     val lines = max(1, p.lineBoxes.size)
-                    area(row, 0, row, lastCol, p.text, styleId(p.fontPt, p.bold, false, align, VAlign.CENTER, if (align == Align.LEFT) indent else 0))
+                    area(row, 0, row, lastCol, p.text, styleId(p.fontPt, p.bold, p.color, false, align, VAlign.CENTER, if (align == Align.LEFT) indent else 0))
                     rowHeights[row] = max(p.fontPt * 1.35f * lines, 15f)
                     row++
                 }
                 is TableBlock -> {
                     val base = row
+                    tablePlacements.add(block to base)
+                    // Cỡ chữ đồng nhất trong bảng kẻ ô (trung vị), không vượt ~60% chiều cao hàng thấp nhất.
+                    val fonts = block.cells.flatMap { c -> c.paragraphs.filter { !it.bold }.map { it.fontPt } }.sorted()
+                    val minRowPt = (0 until block.rowCount).minOfOrNull { (block.rowEdges[it + 1] - block.rowEdges[it]) * pt } ?: 20f
+                    val uniform = if (fonts.isEmpty()) 12f else min(fonts[fonts.size / 2], max(8f, minRowPt * 0.45f))
                     for (r in 0 until block.rowCount) {
                         rowHeights[base + r] = max(15f, (block.rowEdges[r + 1] - block.rowEdges[r]) * pt)
                     }
@@ -128,13 +138,31 @@ object XlsxWriter {
                         val first = cell.paragraphs.firstOrNull()
                         val text = cell.paragraphs.joinToString("\n") { it.text }
                         val align = when (first?.align) { null, Align.JUSTIFY -> if (cell.paragraphs.size > 0 && text.length > 30) Align.JUSTIFY else Align.LEFT; else -> first.align }
-                        val style = styleId(first?.fontPt ?: 12f, first?.bold ?: false, block.bordered, align, cell.vAlign, 0)
+                        val size = when {
+                            first == null -> uniform
+                            block.bordered && !first.bold -> uniform
+                            else -> first.fontPt
+                        }
+                        val style = styleId(size, first?.bold ?: false, first?.color ?: 0, block.bordered, align, cell.vAlign, 0)
                         area(base + cell.row, c0, base + cell.row + cell.rowSpan - 1, c1, text, style)
                     }
                     row = base + block.rowCount
                 }
                 is ImageBlock -> Unit // Ảnh con dấu/chữ ký: Excel không cần, giữ bố cục chữ + bảng.
             }
+        }
+
+        // Ghi chú cạnh bảng → ô cùng hàng, đúng cột bên cạnh bảng (như vị trí trên giấy).
+        for (p in floats) {
+            val placed = tablePlacements.firstOrNull { (t, _) -> p.box.cy >= t.box.top && p.box.cy <= t.box.bottom } ?: continue
+            val (t, base) = placed
+            var ri = 0
+            while (ri < t.rowCount - 1 && p.box.cy > t.rowEdges[ri + 1]) ri++
+            val r = base + ri
+            val c = edgeIndex(p.box.left).coerceAtMost(lastCol)
+            val existing = rows[r]?.get(c)?.text.orEmpty()
+            val text = if (existing.isBlank()) p.text else existing + "\n" + p.text
+            put(r, c, CellData(text, styleId(p.fontPt, p.bold, p.color, false, Align.LEFT, VAlign.CENTER, 0)))
         }
 
         val sb = StringBuilder(XML_HEADER)
@@ -196,7 +224,9 @@ object XlsxWriter {
         for (f in fonts) {
             sb.append("<font>")
             if (f.bold) sb.append("<b/>")
-            sb.append("<sz val=\"${f.size}\"/><name val=\"$DEFAULT_FONT\"/><family val=\"1\"/></font>")
+            sb.append("<sz val=\"${f.size}\"/>")
+            if (f.color != 0) sb.append("<color rgb=\"FF${String.format(java.util.Locale.US, "%06X", f.color and 0xFFFFFF)}\"/>")
+            sb.append("<name val=\"$DEFAULT_FONT\"/><family val=\"1\"/></font>")
         }
         sb.append("</fonts>")
         sb.append("<fills count=\"2\"><fill><patternFill patternType=\"none\"/></fill><fill><patternFill patternType=\"gray125\"/></fill></fills>")

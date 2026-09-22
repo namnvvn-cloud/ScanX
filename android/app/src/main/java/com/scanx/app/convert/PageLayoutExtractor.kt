@@ -5,6 +5,7 @@ import android.graphics.Rect
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.Text
 import com.google.mlkit.vision.text.TextRecognizer
+import com.scanx.app.scan.ScanFilters
 import com.scanx.app.util.awaitTask
 import org.opencv.android.Utils
 import org.opencv.core.Core
@@ -15,63 +16,82 @@ import org.opencv.core.Scalar
 import org.opencv.core.Size
 import org.opencv.imgproc.Imgproc
 import java.io.ByteArrayOutputStream
+import kotlin.math.max
 
 /**
- * Phần phụ thuộc Android của engine chuyển đổi: từ ảnh 1 trang → [PageInput] cho [LayoutAnalyzer].
- *  - OCR: ML Kit Text Recognition v2 (on-device, tiếng Việt hỗ trợ chính thức) → dòng + từ kèm toạ độ.
- *  - Đường kẻ bảng: nhị phân hoá thích nghi + morphology mở với phần tử cấu trúc dài ngang/dọc.
- *  - Độ dày nét từng dòng (distance transform) → suy chữ đậm.
- *  - Vùng mực màu (con dấu đỏ, chữ ký xanh) → cắt nguyên ảnh để chèn lại đúng vị trí.
+ * Phần phụ thuộc Android của engine chuyển đổi: từ ảnh 1 trang (màu, đúng chiều) → [PageInput].
+ *  - Chuẩn hoá ánh sáng trước (bản đen trắng A2 của [ScanFilters]) → OCR, đường kẻ, độ dày nét
+ *    không bị bóng đổ/nền ố làm sai.
+ *  - OCR: ML Kit Text Recognition v2 (on-device) → dòng + từ kèm toạ độ và độ tin cậy.
+ *  - Đường kẻ bảng: nhị phân thích nghi + morphology mở với phần tử cấu trúc dài ngang/dọc.
+ *  - Màu chữ: trung bình màu các điểm mực của từng dòng trên ảnh màu đã cân bằng trắng → quy về
+ *    đen/xanh/đỏ/xanh lá/tím ([InkColor]).
+ *  - Hình giữ nguyên dạng ảnh: CHỈ con dấu đỏ và vùng màu không chứa chữ (logo, hình minh hoạ);
+ *    chữ viết bằng mực màu luôn được xuất thành chữ.
  */
 class PageLayoutExtractor(private val recognizer: TextRecognizer) {
 
     suspend fun extract(page: Bitmap): PageInput {
-        val text = recognizer.process(InputImage.fromBitmap(page, 0)).awaitTask()
-
         val rgba = Mat()
         Utils.bitmapToMat(page, rgba)
-        val gray = Mat()
-        Imgproc.cvtColor(rgba, gray, Imgproc.COLOR_RGBA2GRAY)
+        val gray = ScanFilters.bwHq(rgba)
+        val color = ScanFilters.colorNormalized(rgba)
+        val ocrBmp = Bitmap.createBitmap(page.width, page.height, Bitmap.Config.ARGB_8888)
+        val shown = Mat()
+        Imgproc.cvtColor(gray, shown, Imgproc.COLOR_GRAY2RGBA)
+        Utils.matToBitmap(shown, ocrBmp)
+        shown.release()
         try {
-            val lines = ocrLines(text, gray)
+            val text = recognizer.process(InputImage.fromBitmap(ocrBmp, 0)).awaitTask()
+            val lines = ocrLines(text, gray, color)
             val rules = detectRules(gray)
-            val figures = detectColorFigures(rgba, page)
+            val figures = detectFigures(rgba, page)
             return PageInput(page.width, page.height, lines, rules, figures)
         } finally {
+            ocrBmp.recycle()
             rgba.release()
             gray.release()
+            color.release()
         }
     }
 
     private fun Rect.toBox() = Box(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat())
 
-    private fun ocrLines(text: Text, gray: Mat): List<OcrLine> {
+    private fun ocrLines(text: Text, gray: Mat, color: Mat): List<OcrLine> {
         val out = ArrayList<OcrLine>()
         for (block in text.textBlocks) {
             for (line in block.lines) {
                 val rect = line.boundingBox ?: continue
-                val words = line.elements.mapNotNull { el -> el.boundingBox?.let { OcrWord(el.text, it.toBox()) } }
-                out.add(OcrLine(line.text, rect.toBox(), words, strokeWidth(gray, rect)))
+                val (stroke, ink) = strokeAndInk(gray, color, rect)
+                val words = line.elements.mapNotNull { el ->
+                    el.boundingBox?.let { OcrWord(el.text, it.toBox(), ink, el.confidence) }
+                }
+                out.add(OcrLine(line.text, rect.toBox(), words, stroke, ink, line.confidence))
             }
         }
         return out
     }
 
-    /** Độ dày nét trung bình trong khung dòng (px): 2 × trung bình distance transform trên điểm mực. */
-    private fun strokeWidth(gray: Mat, r: Rect): Float {
+    /**
+     * Độ dày nét trung bình (px) = 2 × trung bình distance transform trên điểm mực, và màu mực của dòng.
+     */
+    private fun strokeAndInk(gray: Mat, color: Mat, r: Rect): Pair<Float, Int> {
         val x = r.left.coerceIn(0, gray.cols() - 1)
         val y = r.top.coerceIn(0, gray.rows() - 1)
         val w = (r.right.coerceAtMost(gray.cols()) - x)
         val h = (r.bottom.coerceAtMost(gray.rows()) - y)
-        if (w < 4 || h < 4) return 0f
+        if (w < 4 || h < 4) return 0f to InkColor.BLACK
         val crop = gray.submat(y, y + h, x, x + w)
         val bw = Mat()
         Imgproc.threshold(crop, bw, 0.0, 255.0, Imgproc.THRESH_BINARY_INV or Imgproc.THRESH_OTSU)
         val dt = Mat()
         Imgproc.distanceTransform(bw, dt, Imgproc.DIST_L2, 3)
-        val mean = Core.mean(dt, bw).`val`[0]
-        crop.release(); bw.release(); dt.release()
-        return (2.0 * mean).toFloat()
+        val stroke = (2.0 * Core.mean(dt, bw).`val`[0]).toFloat()
+        val cc = color.submat(y, y + h, x, x + w)
+        val m = Core.mean(cc, bw).`val`
+        val ink = if (Core.countNonZero(bw) < 10) InkColor.BLACK else InkColor.classify(m[0].toInt(), m[1].toInt(), m[2].toInt())
+        crop.release(); bw.release(); dt.release(); cc.release()
+        return stroke to ink
     }
 
     private fun detectRules(gray: Mat): List<RuleSegment> {
@@ -101,13 +121,13 @@ class PageLayoutExtractor(private val recognizer: TextRecognizer) {
             hier.release(); m.release()
         }
         collect(Size((w / 30).coerceAtLeast(10).toDouble(), 1.0), Size(9.0, 3.0), horizontal = true)
-        collect(Size(1.0, (h / 60).coerceAtLeast(10).toDouble()), Size(3.0, 9.0), horizontal = false)
+        collect(Size(1.0, (h / 45).coerceAtLeast(10).toDouble()), Size(3.0, 9.0), horizontal = false)
         bw.release()
         return out
     }
 
-    /** Vùng mực có màu (đỏ/xanh): con dấu, chữ ký, logo màu → cắt JPEG giữ nguyên. */
-    private fun detectColorFigures(rgba: Mat, page: Bitmap): List<Figure> {
+    /** Vùng mực màu gọn: con dấu đỏ (luôn giữ ảnh) và hình/logo màu (LayoutAnalyzer loại vùng có chữ). */
+    private fun detectFigures(rgba: Mat, page: Bitmap): List<Figure> {
         val rgb = Mat()
         Imgproc.cvtColor(rgba, rgb, Imgproc.COLOR_RGBA2RGB)
         val hsv = Mat()
@@ -115,7 +135,12 @@ class PageLayoutExtractor(private val recognizer: TextRecognizer) {
         rgb.release()
         val mask = Mat()
         Core.inRange(hsv, Scalar(0.0, 90.0, 0.0), Scalar(180.0, 255.0, 235.0), mask)
-        hsv.release()
+        val red1 = Mat()
+        val red2 = Mat()
+        Core.inRange(hsv, Scalar(0.0, 90.0, 40.0), Scalar(10.0, 255.0, 255.0), red1)
+        Core.inRange(hsv, Scalar(160.0, 90.0, 40.0), Scalar(180.0, 255.0, 255.0), red2)
+        Core.bitwise_or(red1, red2, red1)
+        red2.release(); hsv.release()
         Imgproc.morphologyEx(mask, mask, Imgproc.MORPH_OPEN, Mat.ones(3, 3, CvType.CV_8U))
         Imgproc.dilate(mask, mask, Mat.ones(21, 21, CvType.CV_8U))
         val contours = ArrayList<MatOfPoint>()
@@ -133,12 +158,19 @@ class PageLayoutExtractor(private val recognizer: TextRecognizer) {
             val cw = r.width.coerceAtMost(page.width - x)
             val ch = r.height.coerceAtMost(page.height - y)
             if (cw < 8 || ch < 8) continue
+            // Con dấu: phần lớn điểm màu là đỏ, khung gần vuông/tròn.
+            val sub = red1.submat(y, y + ch, x, x + cw)
+            val redRatio = Core.countNonZero(sub).toDouble() / max(1, cw * ch)
+            sub.release()
+            val aspect = cw.toDouble() / ch
+            val isStamp = redRatio > 0.08 && aspect in 0.6..1.7 && cw * ch > area * 0.006
             val crop = Bitmap.createBitmap(page, x, y, cw, ch)
             val bos = ByteArrayOutputStream()
             crop.compress(Bitmap.CompressFormat.JPEG, 90, bos)
             crop.recycle()
-            out.add(Figure(Box(x.toFloat(), y.toFloat(), (x + cw).toFloat(), (y + ch).toFloat()), bos.toByteArray()))
+            out.add(Figure(Box(x.toFloat(), y.toFloat(), (x + cw).toFloat(), (y + ch).toFloat()), bos.toByteArray(), isStamp))
         }
+        red1.release()
         return out
     }
 }

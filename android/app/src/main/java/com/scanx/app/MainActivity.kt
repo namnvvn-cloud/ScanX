@@ -9,6 +9,9 @@ import android.os.Build
 import android.provider.MediaStore
 import androidx.activity.result.contract.ActivityResultContract
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material3.Checkbox
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -48,6 +51,7 @@ import com.scanx.app.data.DocumentMeta
 import com.scanx.app.ui.ScanCameraViewModel
 import com.scanx.app.ui.ScanViewModel
 import com.scanx.app.ui.screens.AdvancedSettingsScreen
+import com.scanx.app.ui.screens.CloudSettingsDialog
 import com.scanx.app.ui.screens.DocumentDetailScreen
 import com.scanx.app.ui.screens.HomeScreen
 import com.scanx.app.ui.screens.ScanCameraScreen
@@ -103,6 +107,9 @@ class MainActivity : ComponentActivity() {
                     var pendingSave by remember { mutableStateOf<File?>(null) }
                     var convertedFile by remember { mutableStateOf<Pair<File, ExportFormat>?>(null) }
                     var convertUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
+                    var showCloudSettings by remember { mutableStateOf(false) }
+                    var cloudConfigured by remember { mutableStateOf(viewModel.isCloudConfigured) }
+                    var convertWithCloud by remember { mutableStateOf(false) }
                     val prefs = remember { com.scanx.app.data.AppPreferences(context) }
 
                     LaunchedEffect(errorMessage) {
@@ -225,6 +232,8 @@ class MainActivity : ComponentActivity() {
                                 onBack = { screen = Screen.Home },
                                 onScanningClick = { screen = Screen.ScanningSettings },
                                 onAdvancedClick = { screen = Screen.AdvancedSettings },
+                                cloudConfigured = cloudConfigured,
+                                onCloudAiClick = { showCloudSettings = true },
                                 onRecommendApp = { shareApp() },
                                 onComingSoon = { showComingSoon() },
                             )
@@ -280,10 +289,11 @@ class MainActivity : ComponentActivity() {
                                     document = document,
                                     pdfFile = viewModel.getPdfFile(document.id),
                                     onBack = { screen = Screen.Home },
-                                    onExport = { format, share ->
-                                        viewModel.exportDocument(document.id, format) { files -> deliver(files, format, share) }
+                                    onExport = { format, mode, useCloud, share ->
+                                        viewModel.exportDocument(document.id, format, mode, useCloud) { files -> deliver(files, format, share) }
                                     },
-                                    onComingSoon = { showComingSoon() },
+                                    cloudConfigured = cloudConfigured,
+                                    onOpenCloudSettings = { showCloudSettings = true },
                                     onDelete = {
                                         viewModel.moveToTrash(document.id)
                                         screen = Screen.Home
@@ -304,13 +314,33 @@ class MainActivity : ComponentActivity() {
                                         TextButton(onClick = {
                                             val uris = convertUris
                                             convertUris = emptyList()
-                                            viewModel.convertFiles(uris, f) { file -> convertedFile = file to f }
+                                            viewModel.convertFiles(uris, f, convertWithCloud && cloudConfigured) { file -> convertedFile = file to f }
                                         }) { Text(f.label) }
+                                    }
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.clickable { if (cloudConfigured) convertWithCloud = !convertWithCloud else showCloudSettings = true },
+                                    ) {
+                                        Checkbox(checked = convertWithCloud && cloudConfigured, onCheckedChange = { if (cloudConfigured) convertWithCloud = it else showCloudSettings = true })
+                                        Text(getString(R.string.convert_use_cloud))
                                     }
                                 }
                             },
                             confirmButton = {},
                             dismissButton = { TextButton(onClick = { convertUris = emptyList() }) { Text(getString(R.string.action_cancel)) } },
+                        )
+                    }
+
+                    if (showCloudSettings) {
+                        CloudSettingsDialog(
+                            initialKey = viewModel.cloudApiKey(),
+                            initialModel = viewModel.cloudModel(),
+                            onDismiss = { showCloudSettings = false },
+                            onSave = { key, model ->
+                                viewModel.saveCloudSettings(key, model)
+                                cloudConfigured = key.isNotBlank()
+                                showCloudSettings = false
+                            },
                         )
                     }
 

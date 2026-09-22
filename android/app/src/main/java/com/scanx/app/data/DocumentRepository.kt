@@ -1,7 +1,6 @@
 package com.scanx.app.data
 
 import android.content.Context
-import android.graphics.Bitmap
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -14,6 +13,7 @@ import java.util.concurrent.TimeUnit
 /**
  * Lưu trữ tài liệu scan cục bộ trên máy, chưa cần backend (đúng theo Phase 1 MVP offline-first).
  * Cấu trúc thư mục: filesDir/ScanX/documents/<id>/document.pdf + meta.json + thumbnail.jpg
+ * + pages/page_NNN.jpg (ảnh master màu từng trang) + text_layers.json (lớp chữ OCR).
  * Danh sách folder (chỉ để gom nhóm, không phải thư mục hệ điều hành) lưu ở filesDir/ScanX/folders.json.
  *
  * Dùng org.json (có sẵn trong Android SDK, không cần thêm dependency) để tránh rủi ro version
@@ -41,36 +41,91 @@ class DocumentRepository(private val context: Context) {
 
     fun getThumbnailFile(id: String): File = File(rootDir, "$id/thumbnail.jpg")
 
+    fun getPagesDir(id: String): File = File(rootDir, "$id/pages")
+
+    /** Ảnh master màu từng trang (chỉ có với tài liệu tạo từ bản 0.3 trở đi; bản cũ trả về rỗng). */
+    fun getPageFiles(id: String): List<File> =
+        getPagesDir(id).listFiles { f -> f.isFile && f.name.endsWith(".jpg") }?.sortedBy { it.name } ?: emptyList()
+
+    /** Lớp chữ OCR đã lưu (toạ độ chuẩn hoá) để dựng lại PDF ở chế độ khác vẫn tìm kiếm được. */
+    fun getTextLayers(id: String): List<List<PdfTextLine>> {
+        val f = File(rootDir, "$id/text_layers.json")
+        if (!f.exists()) return emptyList()
+        return try {
+            val arr = JSONArray(f.readText())
+            (0 until arr.length()).map { p ->
+                val lines = arr.getJSONArray(p)
+                (0 until lines.length()).map { i ->
+                    val o = lines.getJSONArray(i)
+                    PdfTextLine(o.getString(0), o.getDouble(1).toFloat(), o.getDouble(2).toFloat(), o.getDouble(3).toFloat(), o.getDouble(4).toFloat())
+                }
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
     /**
-     * Ghép các trang đã chụp (đã làm phẳng/tăng nét) thành 1 tài liệu mới: tạo PDF, lưu thumbnail,
-     * ghi metadata (đã có sẵn text OCR nhận dạng trước đó).
+     * Tạo tài liệu mới từ các ảnh master (màu, đã làm phẳng): chuyển ảnh vào thư mục tài liệu, dựng PDF
+     * theo [pdfMode] (mặc định Đen trắng – Chất lượng cao), lưu thumbnail, lớp chữ OCR và metadata.
      */
     fun saveDocument(
-        pages: List<Bitmap>,
+        masters: List<File>,
         ocrText: String,
         folderId: String? = null,
         title: String? = null,
-        textLayers: List<List<TextLayerLine>> = emptyList(),
+        textLayers: List<List<PdfTextLine>> = emptyList(),
+        pdfMode: PdfExportMode = PdfExportMode.DEFAULT,
     ): DocumentMeta {
-        require(pages.isNotEmpty()) { "Không có trang nào để lưu" }
+        require(masters.isNotEmpty()) { "Không có trang nào để lưu" }
         val id = UUID.randomUUID().toString()
         val folder = File(rootDir, id).apply { mkdirs() }
-
-        PdfBuilder.buildPdf(pages, File(folder, "document.pdf"), textLayers)
-        PdfBuilder.saveThumbnail(pages.first(), getThumbnailFile(id))
+        val pagesDir = getPagesDir(id).apply { mkdirs() }
+        val stored = masters.mapIndexed { i, src ->
+            val dst = File(pagesDir, String.format(Locale.US, "page_%03d.jpg", i + 1))
+            if (!src.renameTo(dst)) {
+                src.copyTo(dst, overwrite = true)
+                src.delete()
+            }
+            dst
+        }
+        writeTextLayers(folder, textLayers)
 
         val createdAt = System.currentTimeMillis()
+        val finalTitle = title ?: defaultTitleFor(createdAt)
+        PdfBuilder.buildPdf(stored, File(folder, "document.pdf"), pdfMode, finalTitle, textLayers)
+        PdfBuilder.saveThumbnail(stored.first(), pdfMode, getThumbnailFile(id))
+
         val meta = DocumentMeta(
             id = id,
-            title = title ?: defaultTitleFor(createdAt),
+            title = finalTitle,
             createdAtEpochMillis = createdAt,
             modifiedAtEpochMillis = createdAt,
-            pageCount = pages.size,
+            pageCount = stored.size,
             ocrText = ocrText,
             folderId = folderId,
+            pdfMode = pdfMode.code,
         )
         writeMeta(folder, meta)
         return meta
+    }
+
+    /** Dựng PDF của tài liệu [id] ở chế độ [mode] ra [outFile] (dùng khi xuất file). */
+    fun buildPdf(id: String, mode: PdfExportMode, outFile: File, title: String): Boolean {
+        val pages = getPageFiles(id)
+        if (pages.isEmpty()) return false
+        PdfBuilder.buildPdf(pages, outFile, mode, title, getTextLayers(id))
+        return true
+    }
+
+    private fun writeTextLayers(folder: File, layers: List<List<PdfTextLine>>) {
+        val arr = JSONArray()
+        for (page in layers) {
+            val pa = JSONArray()
+            for (l in page) pa.put(JSONArray().put(l.text).put(l.left.toDouble()).put(l.top.toDouble()).put(l.right.toDouble()).put(l.bottom.toDouble()))
+            arr.put(pa)
+        }
+        File(folder, "text_layers.json").writeText(arr.toString())
     }
 
     fun deleteDocumentPermanently(id: String) {
@@ -128,6 +183,7 @@ class DocumentRepository(private val context: Context) {
             put("folderId", meta.folderId ?: JSONObject.NULL)
             put("isTrashed", meta.isTrashed)
             put("trashedAtEpochMillis", meta.trashedAtEpochMillis ?: JSONObject.NULL)
+            put("pdfMode", meta.pdfMode ?: JSONObject.NULL)
         }
         File(folder, "meta.json").writeText(json.toString())
     }
@@ -149,6 +205,7 @@ class DocumentRepository(private val context: Context) {
                 isTrashed = json.optBoolean("isTrashed", false),
                 trashedAtEpochMillis = if (json.isNull("trashedAtEpochMillis")) null
                     else json.optLong("trashedAtEpochMillis").takeIf { it != 0L },
+                pdfMode = if (json.isNull("pdfMode")) null else json.optString("pdfMode", null),
             )
         } catch (e: Exception) {
             null

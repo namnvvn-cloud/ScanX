@@ -132,10 +132,6 @@ object TableDetector {
         val vMax = vs.maxOf { it.end }
         if (vMin < rowEdges.first() - tol * 3) rowEdges.add(0, vMin)
         if (vMax > rowEdges.last() + tol * 3) rowEdges.add(vMax)
-        val rows = rowEdges.size - 1
-        val cols = colEdges.size - 1
-        if (rows < 1 || cols < 1) return null
-
         fun coverage(segs: List<Seg>, pos: Float, a: Float, b: Float): Float {
             val span = b - a
             if (span <= 0f) return 1f
@@ -152,6 +148,20 @@ object TableDetector {
             if (!curS.isNaN()) covered += curE - curS
             return covered / span
         }
+
+        // Đường chia bên trong phải phủ ≥ 30% chiều cao (dọc) / chiều rộng (ngang) của bảng: loại nét
+        // viết tay dài, ô vẽ tay, gạch chéo… nằm trong bảng in sẵn (chúng tạo ra hàng loạt cột giả).
+        run {
+            val top = rowEdges.first(); val bottom = rowEdges.last()
+            val left = colEdges.first(); val right = colEdges.last()
+            val keptC = colEdges.filterIndexed { i, e -> i == 0 || i == colEdges.size - 1 || coverage(vs, e, top, bottom) >= 0.3f }
+            val keptR = rowEdges.filterIndexed { i, e -> i == 0 || i == rowEdges.size - 1 || coverage(hs, e, left, right) >= 0.3f }
+            colEdges.clear(); colEdges.addAll(keptC)
+            rowEdges.clear(); rowEdges.addAll(keptR)
+        }
+        val rows = rowEdges.size - 1
+        val cols = colEdges.size - 1
+        if (rows < 1 || cols < 1) return null
 
         // Có đường dọc ở biên cột c (giữa cột c-1 và c) trong hàng r?
         fun hasV(r: Int, c: Int) = coverage(vs, colEdges[c], rowEdges[r], rowEdges[r + 1]) >= 0.5f

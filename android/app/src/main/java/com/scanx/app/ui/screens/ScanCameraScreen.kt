@@ -5,6 +5,7 @@ import android.util.Size as AndroidSize
 import android.widget.Toast
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
@@ -69,10 +70,12 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.scanx.app.data.CaptureMode
+import com.scanx.app.scan.AutoCaptureController
 import com.scanx.app.scan.DetectedQuad
 import com.scanx.app.ui.ScanCameraViewModel
 import kotlinx.coroutines.delay
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * Màn hình camera tự viết (CameraX + OpenCV), thay cho UI camera có sẵn của Google ML Kit Document
@@ -99,6 +102,8 @@ fun ScanCameraScreen(
     val waitingForNewPage by viewModel.waitingForNewPage.collectAsStateWithLifecycle()
     val isAiReady by viewModel.isAiReady.collectAsStateWithLifecycle()
     val processingCount by viewModel.processingCount.collectAsStateWithLifecycle()
+    val captureHint by viewModel.captureHint.collectAsStateWithLifecycle()
+    val focusRequest by viewModel.focusRequest.collectAsStateWithLifecycle()
 
     var camera by remember { mutableStateOf<Camera?>(null) }
     var showReview by remember { mutableStateOf(false) }
@@ -156,15 +161,16 @@ fun ScanCameraScreen(
                 .build()
                 .also { it.setAnalyzer(analysisExecutor) { proxy -> viewModel.onFrameAnalyzed(proxy) } }
             val imageCapture = ImageCapture.Builder()
-                // Zero Shutter Lag: CameraX giữ sẵn bộ đệm khung hình, lấy đúng khung tại thời điểm bấm
-                // → gần như không trễ. Máy không hỗ trợ thì CameraX tự lùi về MINIMIZE_LATENCY.
-                .setCaptureMode(ImageCapture.CAPTURE_MODE_ZERO_SHUTTER_LAG)
+                // MINIMIZE_LATENCY thay cho Zero Shutter Lag: ZSL trả về khung đã nằm sẵn trong bộ đệm
+                // (có thể là khung lúc tay còn đang rung → ảnh mờ). Ảnh chụp ngay sau khi đã giữ yên 0,7 s
+                // và đã lấy nét vào tâm tài liệu → nét hơn, vẫn nhanh.
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
                 .setResolutionSelector(
                     ResolutionSelector.Builder()
                         .setAspectRatioStrategy(ratio43)
                         .setResolutionStrategy(
                             ResolutionStrategy(
-                                AndroidSize(2560, 1920),
+                                AndroidSize(3264, 2448),
                                 ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER,
                             ),
                         )
@@ -196,6 +202,28 @@ fun ScanCameraScreen(
 
     LaunchedEffect(isFlashOn, camera) {
         camera?.cameraControl?.enableTorch(isFlashOn)
+    }
+
+    // Lấy nét + đo sáng vào tâm tài liệu mỗi khi bắt đầu giữ yên trên trang mới (như Scanner Pro).
+    LaunchedEffect(focusRequest?.id) {
+        val req = focusRequest ?: return@LaunchedEffect
+        val cam = camera ?: return@LaunchedEffect
+        val q = detectedQuad ?: return@LaunchedEffect
+        val vw = previewView.width.toFloat()
+        val vh = previewView.height.toFloat()
+        if (vw <= 0f || vh <= 0f) return@LaunchedEffect
+        val fw = q.frameWidth.toFloat().coerceAtLeast(1f)
+        val fh = q.frameHeight.toFloat().coerceAtLeast(1f)
+        val scale = maxOf(vw / fw, vh / fh)
+        val x = req.point.x * fw * scale + (vw - fw * scale) / 2f
+        val y = req.point.y * fh * scale + (vh - fh * scale) / 2f
+        runCatching {
+            val point = previewView.meteringPointFactory.createPoint(x, y)
+            val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE)
+                .setAutoCancelDuration(3, TimeUnit.SECONDS)
+                .build()
+            cam.cameraControl.startFocusAndMetering(action)
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
@@ -233,6 +261,7 @@ fun ScanCameraScreen(
             captureMode == CaptureMode.MANUAL -> if (detectedQuad != null) "Đã bắt được tài liệu — bấm nút để chụp" else "Đưa tài liệu vào khung hình"
             waitingForNewPage -> "Đã chụp ✓  Lật sang trang tiếp theo"
             detectedQuad == null -> "Đưa tài liệu vào khung hình"
+            captureHint == AutoCaptureController.Hint.EDGE -> "Đưa toàn bộ trang vào khung (đủ 4 góc)"
             autoProgress > 0f -> "Giữ yên…"
             else -> "Đang căn chỉnh…"
         }

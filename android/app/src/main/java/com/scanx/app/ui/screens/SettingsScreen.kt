@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.CloudUpload
@@ -53,6 +54,8 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onScanningClick: () -> Unit,
     onAdvancedClick: () -> Unit,
+    cloudConfigured: Boolean,
+    onCloudAiClick: () -> Unit,
     onRecommendApp: () -> Unit,
     onComingSoon: () -> Unit,
 ) {
@@ -114,6 +117,15 @@ fun SettingsScreen(
                     title = stringResource(R.string.settings_advanced),
                     locked = false,
                     onClick = onAdvancedClick,
+                )
+            }
+            item {
+                SettingsRow(
+                    icon = Icons.Filled.AutoAwesome,
+                    title = stringResource(R.string.settings_cloud_ai),
+                    subtitle = stringResource(if (cloudConfigured) R.string.settings_cloud_ai_on else R.string.settings_cloud_ai_off),
+                    locked = false,
+                    onClick = onCloudAiClick,
                 )
             }
             item {

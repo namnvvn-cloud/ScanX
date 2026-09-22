@@ -1,89 +1,70 @@
 package com.scanx.app.data
 
 import android.graphics.Bitmap
-import android.graphics.Matrix
-import android.graphics.Paint
-import android.graphics.pdf.PdfDocument
+import android.graphics.BitmapFactory
+import com.scanx.app.scan.ScanFilters
 import java.io.File
 import java.io.FileOutputStream
+import kotlin.math.abs
 
 /**
- * Ghép danh sách ảnh (đã chụp + làm phẳng/tăng nét) thành 1 file PDF, mỗi ảnh 1 trang.
- * Dùng android.graphics.pdf.PdfDocument có sẵn trong Android SDK — không cần thêm thư viện PDF
- * ngoài (giảm rủi ro version, phù hợp triết lý của project: hạn chế dependency khi có thể).
+ * Ghép các trang master (ảnh màu đã làm phẳng, lưu JPEG) thành PDF theo [PdfExportMode] bằng
+ * [ScanPdfWriter]. Mỗi trang được giải mã → lọc → mã hoá → ghi → giải phóng ngay, nên tài liệu
+ * nhiều trang không tốn RAM.
+ *
+ * Khổ trang PDF: tỉ lệ gần A4 (±3%) → đúng 595×842 pt (dọc/ngang); gần Letter → 612×792 pt; khác
+ * (hoá đơn, thẻ…) → cạnh dài 842 pt, cạnh kia theo tỉ lệ ảnh. In ra đúng khổ giấy thật.
  */
-/** 1 dòng chữ OCR (toạ độ pixel trên ảnh trang) dùng làm lớp chữ ẩn cho PDF tìm kiếm được. */
-data class TextLayerLine(val text: String, val left: Float, val top: Float, val right: Float, val bottom: Float)
-
 object PdfBuilder {
 
-    /** 72 DPI theo chuẩn PDF point; scale kích thước ảnh (px, thường ~200-300 DPI) về point tương ứng. */
-    private const val PDF_DPI = 170.0
-    private const val POINTS_PER_INCH = 72.0
-
-    /**
-     * [textLayers] (tuỳ chọn, cùng thứ tự với [pages]): vẽ chữ OCR đúng vị trí NẰM DƯỚI ảnh trang → PDF
-     * nhìn y hệt bản scan nhưng tìm kiếm / bôi đen copy chữ được (giống Adobe Scan). Vẽ dưới ảnh vì
-     * Skia bỏ qua lệnh vẽ chữ trong suốt (alpha 0), còn chữ bị ảnh che vẫn được ghi vào PDF.
-     */
-    fun buildPdf(pages: List<Bitmap>, outFile: File, textLayers: List<List<TextLayerLine>> = emptyList()) {
-        require(pages.isNotEmpty()) { "Không có trang nào để tạo PDF" }
-        val document = PdfDocument()
-        try {
-            pages.forEachIndexed { index, bitmap ->
-                val widthPt = (bitmap.width / PDF_DPI * POINTS_PER_INCH).toInt().coerceAtLeast(1)
-                val heightPt = (bitmap.height / PDF_DPI * POINTS_PER_INCH).toInt().coerceAtLeast(1)
-                val pageInfo = PdfDocument.PageInfo.Builder(widthPt, heightPt, index + 1).create()
-                val page = document.startPage(pageInfo)
-                // Vẽ ảnh gốc với ma trận co về kích thước trang (point) thay vì co ảnh trước khi vẽ:
-                // PdfDocument nhúng nguyên ảnh độ phân giải cao → PDF nét khi phóng to/in ấn
-                // (bản cũ co ảnh xuống ~72 DPI nên chữ bị nhoè).
-                val sx = widthPt.toFloat() / bitmap.width
-                val sy = heightPt.toFloat() / bitmap.height
-                textLayers.getOrNull(index)?.let { lines -> drawTextLayer(page.canvas, lines, sx, sy) }
-                val matrix = Matrix().apply { setScale(sx, sy) }
-                page.canvas.drawBitmap(bitmap, matrix, Paint(Paint.FILTER_BITMAP_FLAG))
-                document.finishPage(page)
-            }
-            outFile.parentFile?.mkdirs()
-            FileOutputStream(outFile).use { out -> document.writeTo(out) }
-        } finally {
-            document.close()
-        }
-    }
-
-    private fun drawTextLayer(canvas: android.graphics.Canvas, lines: List<TextLayerLine>, sx: Float, sy: Float) {
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.BLACK }
-        for (l in lines) {
-            val text = l.text.trim()
-            if (text.isEmpty()) continue
-            val h = (l.bottom - l.top) * sy
-            val w = (l.right - l.left) * sx
-            if (h <= 0f || w <= 0f) continue
-            paint.textScaleX = 1f
-            paint.textSize = h * 0.8f
-            val measured = paint.measureText(text)
-            if (measured > 0f) paint.textScaleX = (w / measured).coerceIn(0.2f, 5f)
-            canvas.drawText(text, l.left * sx, l.bottom * sy - h * 0.2f, paint)
-        }
-    }
-
-    /** Lưu trang đầu tiên làm ảnh thumbnail để hiển thị nhanh trên lưới My Scans, không phải render lại PDF mỗi lần. */
-    fun saveThumbnail(firstPage: Bitmap, outFile: File) {
+    fun buildPdf(
+        masters: List<File>,
+        outFile: File,
+        mode: PdfExportMode,
+        title: String,
+        textLayers: List<List<PdfTextLine>> = emptyList(),
+    ) {
+        require(masters.isNotEmpty()) { "Không có trang nào để tạo PDF" }
         outFile.parentFile?.mkdirs()
-        val maxDimension = 480
-        val scale = maxDimension.toFloat() / maxOf(firstPage.width, firstPage.height)
-        val thumb = if (scale < 1f) {
-            Bitmap.createScaledBitmap(
-                firstPage,
-                (firstPage.width * scale).toInt().coerceAtLeast(1),
-                (firstPage.height * scale).toInt().coerceAtLeast(1),
-                true
-            )
-        } else {
-            firstPage
+        val tmp = File(outFile.parentFile, outFile.name + ".tmp")
+        FileOutputStream(tmp).use { out ->
+            ScanPdfWriter.write(out, masters.size, title) { i ->
+                val bmp = BitmapFactory.decodeFile(masters[i].absolutePath)
+                    ?: error("Không đọc được ảnh trang ${i + 1}")
+                try {
+                    val (wPt, hPt) = pageSizePt(bmp.width, bmp.height)
+                    PdfPageSpec(wPt, hPt, ScanFilters.encodeForPdf(bmp, mode), textLayers.getOrNull(i).orEmpty())
+                } finally {
+                    bmp.recycle()
+                }
+            }
         }
+        if (outFile.exists()) outFile.delete()
+        if (!tmp.renameTo(outFile)) {
+            tmp.copyTo(outFile, overwrite = true)
+            tmp.delete()
+        }
+    }
+
+    fun pageSizePt(w: Int, h: Int): Pair<Float, Float> {
+        val portrait = h >= w
+        val ratio = if (portrait) h.toFloat() / w else w.toFloat() / h
+        val (shortPt, longPt) = when {
+            abs(ratio - 1.4142f) / 1.4142f < 0.03f -> 595f to 842f
+            abs(ratio - 1.2941f) / 1.2941f < 0.03f -> 612f to 792f
+            else -> 842f / ratio to 842f
+        }
+        return if (portrait) shortPt to longPt else longPt to shortPt
+    }
+
+    /** Ảnh thu nhỏ trang đầu (theo chế độ hiển thị) cho lưới My Scans. */
+    fun saveThumbnail(firstMaster: File, mode: PdfExportMode, outFile: File) {
+        outFile.parentFile?.mkdirs()
+        val opts = BitmapFactory.Options().apply { inSampleSize = 2 }
+        val src = BitmapFactory.decodeFile(firstMaster.absolutePath, opts) ?: return
+        val thumb = ScanFilters.renderBitmap(src, mode, 480)
+        src.recycle()
         FileOutputStream(outFile).use { out -> thumb.compress(Bitmap.CompressFormat.JPEG, 85, out) }
-        if (thumb !== firstPage) thumb.recycle()
+        thumb.recycle()
     }
 }
