@@ -14,10 +14,14 @@ import java.net.URL
  *   header x-goog-api-key: <key>
  *   body {"model": "...", "input": "...", "generation_config": {"temperature":..., "max_output_tokens":...}}
  * Chữ trả lời nằm ở steps[i].content[j].text với steps[i].type == "model_output".
+ *
+ * Hạn mức miễn phí dễ va phải khi dịch tài liệu nhiều lô liên tiếp → lỗi 429. Tự thử lại tối đa
+ * [RETRY_DELAYS_MS].size lần với thời gian chờ tăng dần trước khi báo lỗi hẳn cho người dùng; lỗi
+ * khoá sai (401/403) hoặc lỗi khác không thử lại (thử lại không giải quyết được gì).
  */
 class GeminiAiClient(private val apiKey: String, private val model: String) {
 
-    class GeminiException(message: String) : Exception(message)
+    open class GeminiException(message: String) : Exception(message)
 
     /** Gửi 1 yêu cầu chỉ có chữ (vd dịch), trả về phần văn bản trả lời của mô hình. */
     fun complete(prompt: String, maxTokens: Int = 8192): String {
@@ -28,8 +32,20 @@ class GeminiAiClient(private val apiKey: String, private val model: String) {
                 "generation_config",
                 JSONObject().put("temperature", 0.2).put("max_output_tokens", maxTokens),
             )
-        return call(body)
+        var lastError: GeminiException? = null
+        for (attempt in 0..RETRY_DELAYS_MS.size) {
+            try {
+                return call(body)
+            } catch (e: RateLimitException) {
+                lastError = e
+                if (attempt < RETRY_DELAYS_MS.size) Thread.sleep(RETRY_DELAYS_MS[attempt])
+            }
+        }
+        throw lastError!!
     }
+
+    /** Lỗi 429 (rate_limit_exceeded/quota_exceeded) — tách riêng để [complete] biết khi nào nên thử lại. */
+    private class RateLimitException(message: String) : GeminiException(message)
 
     private fun call(body: JSONObject): String {
         val conn = (URL(ENDPOINT).openConnection() as HttpURLConnection).apply {
@@ -46,10 +62,10 @@ class GeminiAiClient(private val apiKey: String, private val model: String) {
             val text = (if (code in 200..299) conn.inputStream else conn.errorStream)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
             if (code !in 200..299) {
                 val msg = runCatching { JSONObject(text).getJSONObject("error").getString("message") }.getOrDefault(text.take(200))
+                if (code == 429) throw RateLimitException("Vượt hạn mức miễn phí Gemini, đã tự thử lại nhưng vẫn còn giới hạn ($msg)")
                 throw GeminiException(
                     when (code) {
                         401, 403 -> "API key Gemini không hợp lệ ($msg)"
-                        429 -> "Vượt hạn mức miễn phí Gemini, thử lại sau ít phút ($msg)"
                         else -> "Lỗi Gemini $code: $msg"
                     },
                 )
@@ -73,6 +89,8 @@ class GeminiAiClient(private val apiKey: String, private val model: String) {
 
     companion object {
         private const val ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/interactions"
+        /** Thời gian chờ (ms) trước mỗi lần thử lại khi gặp lỗi 429 — 3 lần thử lại, tổng chờ tối đa ~27 s. */
+        private val RETRY_DELAYS_MS = longArrayOf(3_000L, 8_000L, 16_000L)
         const val DEFAULT_MODEL = "gemini-2.5-flash"
         /** Gợi ý sẵn — Google đổi tên model khá thường xuyên, ô nhập vẫn cho gõ tự do. */
         val SUGGESTED_MODELS = listOf(

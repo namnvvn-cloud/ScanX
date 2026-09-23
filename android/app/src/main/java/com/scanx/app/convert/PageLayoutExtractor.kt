@@ -41,8 +41,8 @@ class PageLayoutExtractor(private val ocr: MultiScriptOcr) {
         try {
             val lines = ocr.recognize(ocrBmp).map { l ->
                 val r = Rect(l.box.left.toInt(), l.box.top.toInt(), l.box.right.toInt(), l.box.bottom.toInt())
-                val (stroke, ink) = strokeAndInk(gray, color, r)
-                l.copy(strokeWidth = stroke, color = ink, words = l.words.map { it.copy(color = ink) })
+                val (stroke, ink, italic) = strokeAndInk(gray, color, r)
+                l.copy(strokeWidth = stroke, color = ink, words = l.words.map { it.copy(color = ink) }, italic = italic)
             }
             val rules = detectRules(gray)
             val figures = detectFigures(rgba, page)
@@ -56,14 +56,15 @@ class PageLayoutExtractor(private val ocr: MultiScriptOcr) {
     }
 
     /**
-     * Độ dày nét trung bình (px) = 2 × trung bình distance transform trên điểm mực, và màu mực của dòng.
+     * Độ dày nét trung bình (px) = 2 × trung bình distance transform trên điểm mực, màu mực của dòng,
+     * và chữ nghiêng (italic, bản 0.7) — xem [estimateItalic].
      */
-    private fun strokeAndInk(gray: Mat, color: Mat, r: Rect): Pair<Float, Int> {
+    private fun strokeAndInk(gray: Mat, color: Mat, r: Rect): Triple<Float, Int, Boolean> {
         val x = r.left.coerceIn(0, gray.cols() - 1)
         val y = r.top.coerceIn(0, gray.rows() - 1)
         val w = (r.right.coerceAtMost(gray.cols()) - x)
         val h = (r.bottom.coerceAtMost(gray.rows()) - y)
-        if (w < 4 || h < 4) return 0f to InkColor.BLACK
+        if (w < 4 || h < 4) return Triple(0f, InkColor.BLACK, false)
         val crop = gray.submat(y, y + h, x, x + w)
         val bw = Mat()
         Imgproc.threshold(crop, bw, 0.0, 255.0, Imgproc.THRESH_BINARY_INV or Imgproc.THRESH_OTSU)
@@ -73,8 +74,47 @@ class PageLayoutExtractor(private val ocr: MultiScriptOcr) {
         val cc = color.submat(y, y + h, x, x + w)
         val m = Core.mean(cc, bw).`val`
         val ink = if (Core.countNonZero(bw) < 10) InkColor.BLACK else InkColor.classify(m[0].toInt(), m[1].toInt(), m[2].toInt())
+        val italic = estimateItalic(bw)
         crop.release(); bw.release(); dt.release(); cc.release()
-        return stroke to ink
+        return Triple(stroke, ink, italic)
+    }
+
+    /**
+     * Chữ nghiêng (italic): dò góc xiên nét chữ bằng phương pháp "projection profile" quen dùng để
+     * chỉnh nghiêng ảnh scan — cắt [bw] (nhị phân, mực = trắng) theo từng góc xiên ứng viên, gộp điểm
+     * mực vào các cột dọc, góc đúng làm nét chữ thẳng cột → histogram cột "nhọn" hơn hẳn (tổng bình
+     * phương số điểm mỗi cột lớn nhất). Chữ thường góc tốt nhất ≈ 0°; chữ nghiêng lệch rõ (Latin
+     * nghiêng phải ~10–15°) → góc tốt nhất lệch hẳn khỏi 0 VÀ nhọn hơn hẳn so với góc 0.
+     */
+    private fun estimateItalic(bw: Mat): Boolean {
+        val h = bw.rows()
+        val w = bw.cols()
+        if (w < 24 || h < 10) return false
+        val nz = MatOfPoint()
+        Core.findNonZero(bw, nz)
+        val pts = nz.toArray()
+        nz.release()
+        if (pts.size < 40) return false
+        val binW = max(1.0, h * 0.12)
+        val nBins = (w / binW).toInt().coerceAtLeast(4) + 4
+        val angles = intArrayOf(-24, -20, -16, -12, -8, -4, 0, 4, 8, 12, 16, 20, 24)
+        var bestScore = -1.0
+        var bestAngle = 0
+        var baseScore = 0.0
+        for (deg in angles) {
+            val t = Math.tan(Math.toRadians(deg.toDouble()))
+            val bins = IntArray(nBins + 2)
+            for (p in pts) {
+                val sx = p.x - t * (p.y - h / 2.0)
+                val bi = (sx / binW).toInt() + 1
+                if (bi in bins.indices) bins[bi]++
+            }
+            var score = 0.0
+            for (c in bins) score += c.toDouble() * c
+            if (deg == 0) baseScore = score
+            if (score > bestScore) { bestScore = score; bestAngle = deg }
+        }
+        return bestAngle != 0 && baseScore > 0.0 && bestScore > baseScore * 1.12
     }
 
     private fun detectRules(gray: Mat): List<RuleSegment> {

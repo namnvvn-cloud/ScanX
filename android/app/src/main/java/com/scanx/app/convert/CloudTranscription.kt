@@ -44,19 +44,53 @@ object CloudTranscription {
                 "chữ viết tay tiếng Việt, số tiền, bảng biểu). Bố cục đã được máy phân tích sẵn thành các Ô CHỮ " +
                 "dưới đây, mỗi ô có mã, khung toạ độ [trái, trên, phải, dưới] theo thang 0–1000 của chiều rộng/chiều cao " +
                 "trang, và bản nháp OCR (thường sai với chữ viết tay).\n\n" +
-                "Nhiệm vụ: đọc chính xác chữ nằm TRONG TỪNG KHUNG trên ảnh và trả về đúng nội dung đó.\n" +
-                "Quy tắc:\n" +
-                "- Giữ nguyên ngôn ngữ và hệ chữ gốc của từng ô: tiếng Việt có dấu đầy đủ, chính xác; tiếng Hàn bằng Hangul; " +
-                "tiếng Nhật bằng Kanji/Kana; tiếng Trung bằng Hán tự; tiếng Anh/Đức/Pháp… đúng chính tả và dấu (ä ö ü ß é è ç…). " +
-                "Mục \"ngôn ngữ\" chỉ là gợi ý của máy, ảnh mới là chuẩn. Giữ nguyên số, " +
-                "ký hiệu tiền (k, tr, đ, M…), dấu ngoặc, dấu +, /, ngày tháng như trên giấy. Không dịch, không giải thích, không sửa nội dung.\n" +
-                "- Ô không có chữ → chuỗi rỗng \"\". Chữ bị gạch xoá → bỏ qua.\n" +
-                "- Nhiều dòng trong 1 ô → nối bằng \\n.\n" +
-                "- Chữ nằm ngoài mọi khung (ghi chú lề, chữ OCR bỏ sót) → đưa vào \"extra\" kèm khung 0–1000.\n" +
+                taskRules() +
                 "Chỉ trả về 1 đối tượng JSON, không kèm chữ nào khác, dạng:\n" +
                 "{\"slots\": {\"<mã>\": \"<nội dung>\", ...}, \"extra\": [{\"text\": \"...\", \"box\": [l, t, r, b]}]}\n\n" +
                 "Các ô chữ:\n",
         )
+        sb.append(slotListing(page))
+        return sb.toString()
+    }
+
+    /**
+     * Chỉ dẫn cho NHIỀU trang trong 1 lần gọi — ảnh đính kèm theo đúng thứ tự Trang 1, Trang 2…
+     * Gộp trang giúp giảm số lần gọi AI Cloud (nhanh hơn, ít tốn hạn mức) khi xuất/dịch tài liệu
+     * nhiều trang viết tay. JSON trả về là 1 mảng "pages" theo đúng thứ tự ảnh đính kèm.
+     */
+    fun batchPrompt(pages: List<DocPage>): String {
+        val sb = StringBuilder()
+        sb.append(
+            "Bạn là hệ thống nhận dạng tài liệu. ${pages.size} ảnh đính kèm theo đúng thứ tự là ${pages.size} TRANG " +
+                "tài liệu đã scan (Trang 1, Trang 2, …) — MỖI ẢNH LÀ 1 TRANG RIÊNG, không liên quan nội dung nhau. " +
+                "Có thể có chữ in, chữ viết tay tiếng Việt, số tiền, bảng biểu. Bố cục mỗi trang đã được máy phân tích " +
+                "sẵn thành các Ô CHỮ dưới đây, mỗi ô có mã, khung toạ độ [trái, trên, phải, dưới] theo thang 0–1000 của " +
+                "chiều rộng/chiều cao TRANG ĐÓ, và bản nháp OCR (thường sai với chữ viết tay).\n\n" +
+                taskRules() +
+                "Chỉ trả về 1 đối tượng JSON, không kèm chữ nào khác, dạng:\n" +
+                "{\"pages\": [ {\"slots\": {\"<mã>\": \"<nội dung>\", ...}, \"extra\": [{\"text\": \"...\", \"box\": [l, t, r, b]}]}, ... ]}\n" +
+                "Mảng \"pages\" phải có đúng ${pages.size} phần tử, theo đúng thứ tự Trang 1 → Trang ${pages.size}.\n\n",
+        )
+        pages.forEachIndexed { i, page ->
+            sb.append("=== Trang ${i + 1} (ảnh thứ ${i + 1}) — các ô chữ ===\n")
+            sb.append(slotListing(page))
+        }
+        return sb.toString()
+    }
+
+    private fun taskRules(): String =
+        "Nhiệm vụ: đọc chính xác chữ nằm TRONG TỪNG KHUNG trên ảnh tương ứng và trả về đúng nội dung đó.\n" +
+            "Quy tắc:\n" +
+            "- Giữ nguyên ngôn ngữ và hệ chữ gốc của từng ô: tiếng Việt có dấu đầy đủ, chính xác; tiếng Hàn bằng Hangul; " +
+            "tiếng Nhật bằng Kanji/Kana; tiếng Trung bằng Hán tự; tiếng Anh/Đức/Pháp… đúng chính tả và dấu (ä ö ü ß é è ç…). " +
+            "Mục \"ngôn ngữ\" chỉ là gợi ý của máy, ảnh mới là chuẩn. Giữ nguyên số, " +
+            "ký hiệu tiền (k, tr, đ, M…), dấu ngoặc, dấu +, /, ngày tháng như trên giấy. Không dịch, không giải thích, không sửa nội dung.\n" +
+            "- Ô không có chữ → chuỗi rỗng \"\". Chữ bị gạch xoá → bỏ qua.\n" +
+            "- Nhiều dòng trong 1 ô → nối bằng \\n.\n" +
+            "- Chữ nằm ngoài mọi khung (ghi chú lề, chữ OCR bỏ sót) → đưa vào \"extra\" kèm khung 0–1000.\n"
+
+    private fun slotListing(page: DocPage): String {
+        val sb = StringBuilder()
         val w = max(1f, page.width.toFloat())
         val h = max(1f, page.height.toFloat())
         for (s in slots(page)) {

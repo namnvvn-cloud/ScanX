@@ -100,7 +100,7 @@ fun DocumentDetailScreen(
     geminiConfigured: Boolean,
     onOpenCloudSettings: () -> Unit,
     onOpenGeminiSettings: () -> Unit,
-    onTranslate: (engine: TranslationChoice, cloudOcr: Boolean, output: ExportFormat, share: Boolean) -> Unit,
+    onTranslate: (engine: TranslationChoice, cloudOcr: Boolean, bilingual: Boolean, output: ExportFormat, share: Boolean) -> Unit,
 ) {
     var showTranslate by remember { mutableStateOf(false) }
     val docMode = PdfExportMode.fromCode(document.pdfMode)
@@ -169,7 +169,7 @@ fun DocumentDetailScreen(
             onDismiss = { showTranslate = false },
             onOpenCloudSettings = { showTranslate = false; onOpenCloudSettings() },
             onOpenGeminiSettings = { showTranslate = false; onOpenGeminiSettings() },
-            onConfirm = { engine, cloudOcr, output, share -> showTranslate = false; onTranslate(engine, cloudOcr, output, share) },
+            onConfirm = { engine, cloudOcr, bilingual, output, share -> showTranslate = false; onTranslate(engine, cloudOcr, bilingual, output, share) },
         )
     }
 

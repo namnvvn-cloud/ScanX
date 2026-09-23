@@ -42,6 +42,8 @@ data class OcrLine(
     val confidence: Float = 1f,
     /** Ngôn ngữ của dòng ("vi", "ko", "ja", "zh", "en"…; "" = chưa rõ) — xem [Lang]. */
     val lang: String = "",
+    /** Chữ nghiêng (italic) — suy từ độ xiên nét chữ (bản 0.7), xem [PageLayoutExtractor]. */
+    val italic: Boolean = false,
 )
 
 /** Đoạn đường kẻ (ngang hoặc dọc) tách được từ ảnh bằng morphology. */
@@ -73,6 +75,8 @@ data class Paragraph(
     val align: Align,
     val fontPt: Float,
     val bold: Boolean,
+    /** Chữ nghiêng (italic) — suy từ độ xiên nét chữ, xem [PageLayoutExtractor] (bản 0.7). */
+    val italic: Boolean = false,
     /** Thụt lề trái tính theo pixel so với mép trái vùng chứa (vùng nội dung trang hoặc ô bảng). */
     val indentPx: Float,
     val spaceBeforePx: Float,

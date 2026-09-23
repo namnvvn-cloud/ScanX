@@ -61,6 +61,10 @@ class ScanCameraViewModel(application: Application) : AndroidViewModel(applicati
     @Volatile private var latestQuad: DetectedQuad? = null
     @Volatile private var latestSignature: FloatArray? = null
 
+    /** Tiêu cự thật ÷ đường chéo cảm biến (không đơn vị) — đọc 1 lần khi mở camera (bản 0.7), nhân
+     *  với đường chéo ảnh chụp (px) ra tiêu cự pixel cho [PageGeometry]. Null = dùng ước lượng cũ. */
+    @Volatile private var focalToSensorDiagRatio: Double? = null
+
     private val _captureMode = MutableStateFlow(prefs.captureMode)
     val captureMode: StateFlow<CaptureMode> = _captureMode.asStateFlow()
 
@@ -119,6 +123,19 @@ class ScanCameraViewModel(application: Application) : AndroidViewModel(applicati
 
     fun attachImageCapture(capture: ImageCapture?) {
         imageCapture = capture
+    }
+
+    /**
+     * Tiêu cự thật + kích thước cảm biến (mm) đọc từ CameraCharacteristics (bản 0.7) — quy về tỉ lệ
+     * không đơn vị (tiêu cự ÷ đường chéo cảm biến) để dùng được với ảnh chụp ở bất kỳ độ phân giải
+     * nào ([PerspectiveTransformer.warp] nhân lại với đường chéo ảnh thật). Không gọi được (máy cũ/
+     * thiếu thông tin) → giữ null, [PageGeometry] tự quay về ước lượng như bản trước.
+     */
+    fun setCameraIntrinsics(focalLengthMm: Float, sensorWidthMm: Float, sensorHeightMm: Float) {
+        val sensorDiagMm = kotlin.math.hypot(sensorWidthMm.toDouble(), sensorHeightMm.toDouble())
+        if (focalLengthMm > 0f && sensorDiagMm > 0.0) {
+            focalToSensorDiagRatio = focalLengthMm / sensorDiagMm
+        }
     }
 
     /** Gọi từ analyzer CameraX (luồng nền). Luôn close() [image] để CameraX gửi khung tiếp theo. */
@@ -223,7 +240,8 @@ class ScanCameraViewModel(application: Application) : AndroidViewModel(applicati
                         else -> refined ?: liveQuad
                     }
                     var m = if (quad != null) {
-                        PerspectiveTransformer.warp(bitmap, quad.points, PAGE_MAX_SIDE)
+                        val focalPx = focalToSensorDiagRatio?.let { it * kotlin.math.hypot(bitmap.width.toDouble(), bitmap.height.toDouble()) }
+                        PerspectiveTransformer.warp(bitmap, quad.points, PAGE_MAX_SIDE, focalPx)
                     } else {
                         PerspectiveTransformer.whole(bitmap, PAGE_MAX_SIDE)
                     }
@@ -325,8 +343,11 @@ class ScanCameraViewModel(application: Application) : AndroidViewModel(applicati
     companion object {
         /** Mỗi nấc độ nhạy trong Cài đặt = 90 ms giữ yên (mặc định 5 nấc = 0,45 s; khung rất yên chỉ ~0,27 s). */
         const val HOLD_MS_PER_STEP = 90L
-        private const val CAPTURE_MAX_SIDE = 3264
-        private const val PAGE_MAX_SIDE = 2800
+        // Bản 0.7: nâng cùng tỉ lệ ~1,27× với độ phân giải chụp mới (4160×3120, xem ScanCameraScreen)
+        // — output DPI tăng từ ~157 lên ~199, ngang Scanner Pro. Bộ lọc (ScanFilters) chạy ở bước xuất
+        // file, không phải trong vòng lặp tự chụp, nên không ảnh hưởng tốc độ căn/tự chụp thời gian thực.
+        private const val CAPTURE_MAX_SIDE = 4160
+        private const val PAGE_MAX_SIDE = 3548
         private const val PREVIEW_MAX_SIDE = 900
         private const val REFINE_MIN_CONFIDENCE = 0.5f
         /** Ảnh trang đã làm phẳng giống trang trước ≥ mức này → coi là chụp trùng. */

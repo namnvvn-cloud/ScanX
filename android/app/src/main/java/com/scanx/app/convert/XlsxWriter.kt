@@ -17,7 +17,7 @@ object XlsxWriter {
 
     private class CellData(val text: String, val style: Int)
     private data class StyleKey(val fontId: Int, val border: Int, val h: String, val v: String, val indent: Int, val fill: Int = 0)
-    private data class FontKey(val size: Float, val bold: Boolean, val color: Int = 0, val name: String = DEFAULT_FONT)
+    private data class FontKey(val size: Float, val bold: Boolean, val color: Int = 0, val name: String = DEFAULT_FONT, val italic: Boolean = false)
 
     private val NUMBER_VN = Regex("^-?\\d{1,3}(\\.\\d{3})+(,\\d+)?$|^-?\\d+(,\\d+)?$")
 
@@ -25,15 +25,15 @@ object XlsxWriter {
         val pkg = OoxmlPackage()
         val fonts = LinkedHashMap<FontKey, Int>()
         val styles = LinkedHashMap<StyleKey, Int>()
-        fun fontId(size: Float, bold: Boolean, color: Int, name: String) = fonts.getOrPut(FontKey(size, bold, color, name)) { fonts.size }
+        fun fontId(size: Float, bold: Boolean, color: Int, name: String, italic: Boolean = false) = fonts.getOrPut(FontKey(size, bold, color, name, italic)) { fonts.size }
         // Font 0 = font mặc định của sổ → quyết định đơn vị độ rộng cột (Calibri 11: 7 px/ký tự) → quy đổi
         // độ rộng cột từ pt chính xác, bảng không tràn lề khi in.
         fontId(11f, false, 0, "Calibri")
         styles[StyleKey(0, 0, "general", "bottom", 0)] = 0
-        fun styleId(size: Float, bold: Boolean, color: Int, lang: String, border: Boolean, align: Align, vAlign: VAlign, indent: Int, fill: Boolean = false): Int {
+        fun styleId(size: Float, bold: Boolean, color: Int, lang: String, border: Boolean, align: Align, vAlign: VAlign, indent: Int, fill: Boolean = false, italic: Boolean = false): Int {
             val h = when (align) { Align.LEFT -> "left"; Align.CENTER -> "center"; Align.RIGHT -> "right"; Align.JUSTIFY -> "justify" }
             val v = when (vAlign) { VAlign.TOP -> "top"; VAlign.CENTER -> "center"; VAlign.BOTTOM -> "bottom" }
-            return styles.getOrPut(StyleKey(fontId(size, bold, color, Lang.fontFor(lang)), if (border) 1 else 0, h, v, indent, if (fill) 2 else 0)) { styles.size }
+            return styles.getOrPut(StyleKey(fontId(size, bold, color, Lang.fontFor(lang), italic), if (border) 1 else 0, h, v, indent, if (fill) 2 else 0)) { styles.size }
         }
 
         val sheetNames = ArrayList<String>()
@@ -73,7 +73,7 @@ object XlsxWriter {
         pkg.writeTo(out)
     }
 
-    private fun sheetXml(page: DocPage, styleId: (Float, Boolean, Int, String, Boolean, Align, VAlign, Int, Boolean) -> Int): String {
+    private fun sheetXml(page: DocPage, styleId: (Float, Boolean, Int, String, Boolean, Align, VAlign, Int, Boolean, Boolean) -> Int): String {
         val pt = page.ptPerPx
         // --- Lưới cột chủ -------------------------------------------------------------------
         val rawEdges = ArrayList<Float>()
@@ -127,7 +127,7 @@ object XlsxWriter {
                     val areaW = max(20f, (edges.last() - edges.first()) * pt * fitScale - 6f)
                     val est = kotlin.math.ceil(p.text.length * 0.5f * p.fontPt / areaW).toInt()
                     val lines = max(max(1, p.lineBoxes.size), est)
-                    area(row, 0, row, lastCol, p.text, styleId(p.fontPt, p.bold, p.color, p.lang, false, align, VAlign.CENTER, if (align == Align.LEFT) indent else 0, false))
+                    area(row, 0, row, lastCol, p.text, styleId(p.fontPt, p.bold, p.color, p.lang, false, align, VAlign.CENTER, if (align == Align.LEFT) indent else 0, false, p.italic))
                     rowHeights[row] = max(p.fontPt * 1.35f * lines, 15f)
                     row++
                 }
@@ -153,7 +153,7 @@ object XlsxWriter {
                             else -> first.fontPt
                         }
                         val header = block.bordered && isHeaderRow(block, cell)
-                        val style = styleId(size, (first?.bold ?: false) || header, first?.color ?: 0, first?.lang ?: "", block.bordered, align, cell.vAlign, 0, header)
+                        val style = styleId(size, (first?.bold ?: false) || header, first?.color ?: 0, first?.lang ?: "", block.bordered, align, cell.vAlign, 0, header, first?.italic ?: false)
                         area(base + cell.row, c0, base + cell.row + cell.rowSpan - 1, c1, text, style)
                     }
                     row = base + block.rowCount
@@ -172,7 +172,7 @@ object XlsxWriter {
             val c = edgeIndex(p.box.left).coerceAtMost(lastCol)
             val existing = rows[r]?.get(c)?.text.orEmpty()
             val text = if (existing.isBlank()) p.text else existing + "\n" + p.text
-            put(r, c, CellData(text, styleId(p.fontPt, p.bold, p.color, p.lang, false, Align.LEFT, VAlign.CENTER, 0, false)))
+            put(r, c, CellData(text, styleId(p.fontPt, p.bold, p.color, p.lang, false, Align.LEFT, VAlign.CENTER, 0, false, p.italic)))
         }
 
         val sb = StringBuilder(XML_HEADER)
@@ -234,6 +234,7 @@ object XlsxWriter {
         for (f in fonts) {
             sb.append("<font>")
             if (f.bold) sb.append("<b/>")
+            if (f.italic) sb.append("<i/>")
             sb.append("<sz val=\"${f.size}\"/>")
             if (f.color != 0) sb.append("<color rgb=\"FF${String.format(java.util.Locale.US, "%06X", f.color and 0xFFFFFF)}\"/>")
             sb.append("<name val=\"${f.name}\"/><family val=\"${if (f.name == DEFAULT_FONT) 1 else 2}\"/></font>")

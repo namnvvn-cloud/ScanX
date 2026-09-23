@@ -120,7 +120,7 @@ object PptxWriter {
 
     private fun runXml(p: Paragraph, sizePt: Float = p.fontPt): String {
         val sz = (sizePt * 100).roundToInt().coerceIn(100, 400000)
-        return "<a:p><a:pPr algn=\"${algn(p.align)}\"/><a:r><a:rPr lang=\"${Lang.ooxml(p.lang)}\"" + (if (Lang.isEastAsian(p.lang)) " altLang=\"vi-VN\"" else "") + " sz=\"$sz\"" + (if (p.bold) " b=\"1\"" else "") + " dirty=\"0\">" +
+        return "<a:p><a:pPr algn=\"${algn(p.align)}\"/><a:r><a:rPr lang=\"${Lang.ooxml(p.lang)}\"" + (if (Lang.isEastAsian(p.lang)) " altLang=\"vi-VN\"" else "") + " sz=\"$sz\"" + (if (p.bold) " b=\"1\"" else "") + (if (p.italic) " i=\"1\"" else "") + " dirty=\"0\">" +
             "<a:solidFill><a:srgbClr val=\"${String.format(java.util.Locale.US, "%06X", p.color and 0xFFFFFF)}\"/></a:solidFill><a:latin typeface=\"$DEFAULT_FONT\"/><a:ea typeface=\"${Lang.fontFor(p.lang)}\"/><a:cs typeface=\"$DEFAULT_FONT\"/></a:rPr>" +
             "<a:t>${xmlEscape(p.text)}</a:t></a:r></a:p>"
     }

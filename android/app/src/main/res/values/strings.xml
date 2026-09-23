@@ -171,6 +171,7 @@
     <string name="translate_engine_claude_off">Claude AI — trả phí, cần nhập API key trong Cài đặt</string>
     <string name="translate_engine_mlkit">ML Kit offline — miễn phí, không gửi tài liệu ra ngoài (tải ~30 MB/ngôn ngữ lần đầu)</string>
     <string name="translate_cloud_ocr">Đọc chữ bằng AI Cloud trước khi dịch (chữ viết tay, chữ mờ)</string>
+    <string name="translate_bilingual">Song ngữ — giữ bản gốc, chèn bản dịch (in nghiêng) ngay bên dưới</string>
     <string name="translate_output">Định dạng bản dịch</string>
     <string name="translate_output_docx">Word (.docx) — giữ bố cục</string>
     <string name="translate_output_txt">Văn bản (.txt)</string>

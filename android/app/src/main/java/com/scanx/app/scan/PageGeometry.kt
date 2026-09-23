@@ -27,15 +27,17 @@ object PageGeometry {
 
     /**
      * [corners] toạ độ pixel theo thứ tự TL, TR, BR, BL trên ảnh kích thước [imageW]×[imageH].
+     * [focalLengthPx] tiêu cự thật (đơn vị pixel, quy đổi theo đường chéo ảnh) đọc từ
+     * CameraCharacteristics của máy (bản 0.7) — null thì dùng ước lượng 0,85×cạnh dài như cũ.
      * Trả về (rộng, cao) pixel của ảnh làm phẳng, cạnh dài không vượt [maxSide].
      */
-    fun outputSize(corners: List<DoubleArray>, imageW: Int, imageH: Int, maxSide: Int): Pair<Int, Int> {
+    fun outputSize(corners: List<DoubleArray>, imageW: Int, imageH: Int, maxSide: Int, focalLengthPx: Double? = null): Pair<Int, Int> {
         val tl = corners[0]; val tr = corners[1]; val br = corners[2]; val bl = corners[3]
         val wAvg = (dist(tl, tr) + dist(bl, br)) / 2
         val hAvg = (dist(tl, bl) + dist(tr, br)) / 2
         val wMax = max(dist(tl, tr), dist(bl, br))
         val hMax = max(dist(tl, bl), dist(tr, br))
-        var ratio = trueAspectRatio(corners, imageW / 2.0, imageH / 2.0) ?: (wAvg / hAvg)
+        var ratio = trueAspectRatio(corners, imageW / 2.0, imageH / 2.0, focalLengthPx?.let { it * it }) ?: (wAvg / hAvg)
         ratio = snapRatio(ratio)
         // Chiều dài theo độ phân giải thực có trên ảnh (cạnh dài nhất), không phóng to vô ích.
         var outH: Double
@@ -52,8 +54,12 @@ object PageGeometry {
         return outW.roundToInt().coerceAtLeast(1) to outH.roundToInt().coerceAtLeast(1)
     }
 
-    /** Tỉ lệ rộng/cao thật, hoặc null khi tứ giác suy biến. (u0, v0) = tâm ảnh. */
-    fun trueAspectRatio(corners: List<DoubleArray>, u0: Double, v0: Double): Double? {
+    /**
+     * Tỉ lệ rộng/cao thật, hoặc null khi tứ giác suy biến. (u0, v0) = tâm ảnh. [f2Prior] = bình
+     * phương tiêu cự thật (pixel²) khi biết từ CameraCharacteristics — dùng thay ước lượng 0,85×cạnh
+     * dài khi công thức 2-điểm-tụ suy biến (chỉ nghiêng theo 1 trục, trường hợp thường gặp nhất).
+     */
+    fun trueAspectRatio(corners: List<DoubleArray>, u0: Double, v0: Double, f2Prior: Double? = null): Double? {
         // Theo ký hiệu bài báo: m1 = TL, m2 = TR, m3 = BL, m4 = BR (toạ độ đồng nhất, gốc tại tâm ảnh).
         fun h(p: DoubleArray) = doubleArrayOf(p[0] - u0, p[1] - v0, 1.0)
         val m1 = h(corners[0]); val m2 = h(corners[1]); val m4 = h(corners[2]); val m3 = h(corners[3])
@@ -66,9 +72,10 @@ object PageGeometry {
         val n3 = DoubleArray(3) { k3 * m3[it] - m1[it] }
         val scale = max(u0, v0) * 2
         // Tiêu cự ước lượng từ 2 điểm tụ; khi 1 cặp cạnh gần song song (chỉ nghiêng theo 1 trục)
-        // công thức suy biến → dùng tiêu cự điển hình camera chính điện thoại (~0,85 × cạnh dài ảnh,
-        // tương đương ống kính 26–28 mm). Sai số tiêu cự ±20% chỉ làm tỉ lệ lệch < 1% ở góc nghiêng thường gặp.
-        val prior = (0.85 * scale) * (0.85 * scale)
+        // công thức suy biến → dùng [f2Prior] (tiêu cự thật đọc từ CameraCharacteristics, bản 0.7) nếu
+        // có, không thì ước lượng 0,85 × cạnh dài ảnh (tương đương ống kính 26–28 mm) như bản cũ.
+        // Sai số tiêu cự ±20% chỉ làm tỉ lệ lệch < 1% ở góc nghiêng thường gặp.
+        val prior = f2Prior ?: ((0.85 * scale) * (0.85 * scale))
         val f2Est = if (abs(n2[2] * n3[2]) < 1e-12) Double.NaN else -(n2[0] * n3[0] + n2[1] * n3[1]) / (n2[2] * n3[2])
         val f2 = if (f2Est.isNaN() || f2Est < 0.25 * scale * scale || f2Est > 9.0 * scale * scale) prior else f2Est
         val num = n2[0] * n2[0] + n2[1] * n2[1] + f2 * n2[2] * n2[2]

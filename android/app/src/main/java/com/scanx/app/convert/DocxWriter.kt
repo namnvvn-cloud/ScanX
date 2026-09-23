@@ -175,7 +175,7 @@ object DocxWriter {
      * 1 run chữ. Chữ Hàn/Nhật/Trung: font Đông Á riêng (w:eastAsia + hint) và mã ngôn ngữ Đông Á → Word
      * hiển thị đúng glyph, không ô vuông; chữ Latin trong cùng run vẫn dùng Times New Roman.
      */
-    private fun runXml(text: String, fontPt: Float, bold: Boolean, color: Int = 0, lang: String = ""): String {
+    private fun runXml(text: String, fontPt: Float, bold: Boolean, color: Int = 0, lang: String = "", italic: Boolean = false): String {
         val sz = (fontPt * 2).roundToInt()
         val ea = Lang.isEastAsian(lang)
         val eaFont = if (ea) Lang.fontFor(lang) else DEFAULT_FONT
@@ -184,6 +184,7 @@ object DocxWriter {
         return "<w:r><w:rPr><w:rFonts w:ascii=\"$DEFAULT_FONT\" w:hAnsi=\"$DEFAULT_FONT\" w:eastAsia=\"$eaFont\" w:cs=\"$DEFAULT_FONT\"" +
             (if (ea) " w:hint=\"eastAsia\"" else "") + "/>" +
             (if (bold) "<w:b/><w:bCs/>" else "") +
+            (if (italic) "<w:i/><w:iCs/>" else "") +
             (if (color != 0) "<w:color w:val=\"${hexColor(color)}\"/>" else "") +
             "<w:sz w:val=\"$sz\"/><w:szCs w:val=\"$sz\"/>$langAttr</w:rPr><w:t xml:space=\"preserve\">${xmlEscape(text)}</w:t></w:r>"
     }
@@ -196,7 +197,7 @@ object DocxWriter {
             sb.append("<w:ind w:left=\"$left\"" + (if (firstLineTw > 40) " w:firstLine=\"$firstLineTw\"" else "") + "/>")
         }
         sb.append("<w:jc w:val=\"${jc(p.align)}\"/></w:pPr>")
-        sb.append(runXml(p.text, p.fontPt, p.bold, p.color, p.lang))
+        sb.append(runXml(p.text, p.fontPt, p.bold, p.color, p.lang, p.italic))
         sb.append("</w:p>")
         return sb.toString()
     }
@@ -225,7 +226,7 @@ object DocxWriter {
             "<wps:wsp><wps:cNvSpPr txBox=\"1\"/><wps:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"$cx\" cy=\"$cy\"/></a:xfrm>" +
             "<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></wps:spPr>" +
             "<wps:txbx><w:txbxContent><w:p><w:pPr><w:spacing w:before=\"0\" w:after=\"0\"/></w:pPr>" +
-            runXml(p.text, p.fontPt, p.bold, p.color, p.lang) + "</w:p></w:txbxContent></wps:txbx>" +
+            runXml(p.text, p.fontPt, p.bold, p.color, p.lang, p.italic) + "</w:p></w:txbxContent></wps:txbx>" +
             "<wps:bodyPr rot=\"0\" wrap=\"none\" lIns=\"0\" tIns=\"0\" rIns=\"0\" bIns=\"0\" anchor=\"t\"><a:spAutoFit/></wps:bodyPr>" +
             "</wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r>"
     }

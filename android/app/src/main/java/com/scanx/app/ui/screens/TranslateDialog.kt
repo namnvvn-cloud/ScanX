@@ -40,7 +40,7 @@ fun TranslateDialog(
     onDismiss: () -> Unit,
     onOpenCloudSettings: () -> Unit,
     onOpenGeminiSettings: () -> Unit,
-    onConfirm: (engine: TranslationChoice, cloudOcr: Boolean, output: ExportFormat, share: Boolean) -> Unit,
+    onConfirm: (engine: TranslationChoice, cloudOcr: Boolean, bilingual: Boolean, output: ExportFormat, share: Boolean) -> Unit,
 ) {
     var engine by remember {
         mutableStateOf(
@@ -52,6 +52,7 @@ fun TranslateDialog(
         )
     }
     var cloudOcr by remember { mutableStateOf(false) }
+    var bilingual by remember { mutableStateOf(false) }
     var output by remember { mutableStateOf(ExportFormat.DOCX) }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -90,6 +91,10 @@ fun TranslateDialog(
                         Text(stringResource(R.string.translate_cloud_ocr), style = MaterialTheme.typography.bodyMedium)
                     }
                 }
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { bilingual = !bilingual }) {
+                    Checkbox(checked = bilingual, onCheckedChange = { bilingual = it })
+                    Text(stringResource(R.string.translate_bilingual), style = MaterialTheme.typography.bodyMedium)
+                }
                 Text(stringResource(R.string.translate_output), style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 12.dp))
                 for ((fmt, label) in listOf(ExportFormat.DOCX to R.string.translate_output_docx, ExportFormat.TXT to R.string.translate_output_txt)) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { output = fmt }) {
@@ -100,13 +105,13 @@ fun TranslateDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(engine, cloudOcr && cloudConfigured, output, false) }) {
+            TextButton(onClick = { onConfirm(engine, cloudOcr && cloudConfigured, bilingual, output, false) }) {
                 Text(stringResource(if (showShare) R.string.export_save else R.string.translate_action))
             }
         },
         dismissButton = {
             if (showShare) {
-                TextButton(onClick = { onConfirm(engine, cloudOcr && cloudConfigured, output, true) }) {
+                TextButton(onClick = { onConfirm(engine, cloudOcr && cloudConfigured, bilingual, output, true) }) {
                     Text(stringResource(R.string.action_share))
                 }
             } else {

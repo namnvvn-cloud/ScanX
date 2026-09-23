@@ -308,8 +308,8 @@ class MainActivity : ComponentActivity() {
                                     geminiConfigured = geminiConfigured,
                                     onOpenCloudSettings = { showCloudSettings = true },
                                     onOpenGeminiSettings = { showGeminiSettings = true },
-                                    onTranslate = { engine, cloudOcr, output, share ->
-                                        viewModel.translateDocument(document.id, engine, cloudOcr, output) { file -> deliver(listOf(file), output, share) }
+                                    onTranslate = { engine, cloudOcr, bilingual, output, share ->
+                                        viewModel.translateDocument(document.id, engine, cloudOcr, bilingual, output) { file -> deliver(listOf(file), output, share) }
                                     },
                                     onDelete = {
                                         viewModel.moveToTrash(document.id)
@@ -357,10 +357,10 @@ class MainActivity : ComponentActivity() {
                             onDismiss = { translateUris = emptyList() },
                             onOpenCloudSettings = { showCloudSettings = true },
                             onOpenGeminiSettings = { showGeminiSettings = true },
-                            onConfirm = { engine, cloudOcr, output, _ ->
+                            onConfirm = { engine, cloudOcr, bilingual, output, _ ->
                                 val uris = translateUris
                                 translateUris = emptyList()
-                                viewModel.translateFiles(uris, engine, cloudOcr, output) { file -> convertedFile = file to output }
+                                viewModel.translateFiles(uris, engine, cloudOcr, bilingual, output) { file -> convertedFile = file to output }
                             },
                         )
                     }

@@ -2,6 +2,7 @@ package com.scanx.app.scan
 
 import kotlin.math.abs
 import kotlin.math.atan
+import kotlin.math.max
 import kotlin.math.min
 
 /**
@@ -194,6 +195,68 @@ object TextLineGeometry {
         var s = 0.0
         for (x in v) s += (x - mean) * (x - mean)
         return Math.sqrt(s / v.size)
+    }
+
+    /**
+     * Bù méo NGANG do trang sách cong theo mặt trụ (gáy sách, bản 0.7 — mở rộng nắn dòng chữ từ 2D
+     * sang "3D"): mặt giấy càng gần gáy càng nghiêng xa ống kính → chữ càng gần gáy càng bị nén lại
+     * theo CẢ 2 chiều, không chỉ lượn sóng theo chiều dọc. Đo độ nén qua khoảng cách dọc giữa 2
+     * baseline kề nhau tại từng cột (cột nén thì khoảng cách dòng cũng hẹp theo cùng tỉ lệ, vì đây là
+     * phép co cùng hệ số ở 1 điểm ảnh) — lấy vùng có khoảng cách dòng LỚN NHẤT làm chuẩn "phẳng", các
+     * cột khác kéo giãn lại đúng tỉ lệ nén so với chuẩn đó bằng phép đổi biến tích luỹ (giữ đơn điệu,
+     * không chồng chéo điểm ảnh). Trả về mảng cột đích → cột nguồn kích thước [w]; identity (x → x)
+     * nếu không đủ dữ liệu hoặc trang đã phẳng đều (không có nén > ~6%).
+     */
+    fun horizontalDewarpMap(lines: List<Baseline>, w: Int): FloatArray {
+        val identity = FloatArray(w) { it.toFloat() }
+        if (lines.size < 3 || w < 20) return identity
+        val sorted = lines.sortedBy { it.centerY }
+        val spacingSum = DoubleArray(w)
+        val spacingCount = IntArray(w)
+        for (i in 0 until sorted.size - 1) {
+            val lo = sorted[i]; val hi = sorted[i + 1]
+            val x0 = max(lo.x0, hi.x0).toInt().coerceIn(0, w - 1)
+            val x1 = min(lo.x1, hi.x1).toInt().coerceIn(0, w - 1)
+            if (x1 <= x0) continue
+            for (x in x0..x1) {
+                val sp = hi.yAt(x.toDouble()) - lo.yAt(x.toDouble())
+                if (sp > 0.5) { spacingSum[x] += sp; spacingCount[x]++ }
+            }
+        }
+        val profile = DoubleArray(w) { if (spacingCount[it] > 0) spacingSum[it] / spacingCount[it] else Double.NaN }
+        fillNaN(profile)
+        val valid = profile.filter { !it.isNaN() }
+        if (valid.size < w / 2) return identity
+        val ref = valid.max()
+        if (ref <= 0.0 || valid.min() / ref > 0.94) return identity
+        // Tích luỹ nghịch đảo hệ số nén → toạ độ "chiều rộng thật" (đơn điệu tăng), quy về đúng [0, w).
+        val cum = DoubleArray(w)
+        var acc = 0.0
+        for (x in 0 until w) {
+            val scale = (profile[x] / ref).coerceIn(0.55, 1.0)
+            acc += 1.0 / scale
+            cum[x] = acc
+        }
+        val norm = (w - 1) / cum[w - 1]
+        for (x in 0 until w) cum[x] *= norm
+        // Đảo hàm tích luỹ: mỗi cột ĐÍCH → cột NGUỒN tương ứng (cum đơn điệu tăng → dò tuần tự O(w)).
+        val out = FloatArray(w)
+        var j = 0
+        for (destX in 0 until w) {
+            while (j < w - 1 && cum[j] < destX) j++
+            val x0i = max(0, j - 1)
+            val c0 = cum[x0i]; val c1 = cum[j]
+            val t = if (c1 > c0) ((destX - c0) / (c1 - c0)).coerceIn(0.0, 1.0) else 0.0
+            out[destX] = (x0i + t * (j - x0i)).toFloat().coerceIn(0f, (w - 1).toFloat())
+        }
+        return out
+    }
+
+    private fun fillNaN(v: DoubleArray) {
+        var last = Double.NaN
+        for (i in v.indices) { if (!v[i].isNaN()) last = v[i] else if (!last.isNaN()) v[i] = last }
+        last = Double.NaN
+        for (i in v.indices.reversed()) { if (!v[i].isNaN()) last = v[i] else if (!last.isNaN()) v[i] = last }
     }
 
     /** Biên tối còn sót sau khi làm phẳng (bóng gáy sách, mép bàn): số px cần cắt mỗi cạnh. */

@@ -85,17 +85,25 @@ object PageRectifier {
         return TextLineGeometry.detect(bytes, w, h)
     }
 
-    /** Nắn dòng chữ về ngang bằng remap theo dải ngang (tiết kiệm RAM). */
+    /**
+     * Nắn dòng chữ về ngang + bù nén ngang do trang cong (bản 0.7, xem
+     * [TextLineGeometry.horizontalDewarpMap]) bằng remap theo dải ngang (tiết kiệm RAM). Nắn ngang
+     * không đổi theo hàng (mặt cong giả định đồng dạng suốt chiều cao trang — đúng với gáy sách chạy
+     * dọc), nắn dọc (bù dòng lượn sóng) vẫn đo lại theo hệ nguồn ĐÃ nắn ngang cho khớp.
+     */
     private fun flatten(src: Mat, lines: List<TextLineGeometry.Baseline>): Mat? {
         val w = src.cols()
         val h = src.rows()
         val scale = w / WORK_WIDTH                     // ảnh thu nhỏ → ảnh gốc
         val maxShiftSmall = (h / scale * MAX_SHIFT_FRAC).toFloat()
-        val rowSmall = FloatArray((WORK_WIDTH).toInt())
+        val smallW = WORK_WIDTH.toInt()
+        val rowSmall = FloatArray(smallW)
+        val hMap = TextLineGeometry.horizontalDewarpMap(lines, smallW) // cột đích(nhỏ) → cột nguồn(nhỏ)
         val dst = Mat(h, w, src.type(), Scalar(255.0, 255.0, 255.0, 255.0))
         val mapX = Mat(BAND, w, CvType.CV_32F)
         val mapY = Mat(BAND, w, CvType.CV_32F)
-        val rowX = FloatArray(w) { it.toFloat() }
+        // Nắn ngang cố định theo mọi hàng → tính 1 lần, quy đổi luôn ra toạ độ ảnh gốc.
+        val rowX = FloatArray(w) { destX -> hMap[(destX / scale).toInt().coerceIn(0, smallW - 1)] * scale }
         val rowY = FloatArray(w)
         var used = false
         var y0 = 0
@@ -104,12 +112,13 @@ object PageRectifier {
             for (r in 0 until rows) {
                 val y = y0 + r
                 val ySmall = (y / scale).roundToInt().coerceIn(0, (h / scale).toInt())
-                val ok = TextLineGeometry.rowOffsets(lines, rowSmall.size, ySmall, rowSmall, maxShiftSmall)
+                val ok = TextLineGeometry.rowOffsets(lines, smallW, ySmall, rowSmall, maxShiftSmall)
                 if (!ok) return null
                 used = true
                 for (x in 0 until w) {
-                    val xs = (x / scale).toInt().coerceIn(0, rowSmall.size - 1)
-                    rowY[x] = (y + rowSmall[xs] * scale).toFloat()
+                    // Độ lượn sóng dọc thuộc về CỘT NGUỒN (nội dung ảnh), không phải cột đích.
+                    val srcXSmall = (rowX[x] / scale).toInt().coerceIn(0, smallW - 1)
+                    rowY[x] = (y + rowSmall[srcXSmall] * scale).toFloat()
                 }
                 mapX.put(r, 0, rowX)
                 mapY.put(r, 0, rowY)

@@ -1,8 +1,10 @@
 package com.scanx.app.ui.screens
 
 import android.graphics.Bitmap
+import android.hardware.camera2.CameraCharacteristics
 import android.util.Size as AndroidSize
 import android.widget.Toast
+import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
@@ -169,8 +171,11 @@ fun ScanCameraScreen(
                     ResolutionSelector.Builder()
                         .setAspectRatioStrategy(ratio43)
                         .setResolutionStrategy(
+                            // Bản 0.7: nâng từ 8MP (3264×2448) lên ~13MP (4160×3120) — tăng ~1,27× mỗi
+                            // chiều, ra ảnh xuất DPI ~157→~199 (ngang Scanner Pro). Bộ lọc chạy lúc xuất
+                            // file, không phải lúc chụp, nên không ảnh hưởng tốc độ vòng lặp tự chụp.
                             ResolutionStrategy(
-                                AndroidSize(3264, 2448),
+                                AndroidSize(4160, 3120),
                                 ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER,
                             ),
                         )
@@ -188,6 +193,18 @@ fun ScanCameraScreen(
                     analysis,
                     imageCapture,
                 )
+                // Tiêu cự thật của ống kính chính (bản 0.7) — thay ước lượng 0,85×cạnh dài trong
+                // PageGeometry khi làm phẳng trang nghiêng. Máy không lộ được thông tin này (hiếm) →
+                // bỏ qua, PageGeometry tự quay lại ước lượng cũ.
+                runCatching {
+                    val cam = camera ?: return@runCatching
+                    val chars = Camera2CameraInfo.from(cam.cameraInfo)
+                    val focalLength = chars.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull()
+                    val sensorSize = chars.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
+                    if (focalLength != null && sensorSize != null) {
+                        viewModel.setCameraIntrinsics(focalLength, sensorSize.width, sensorSize.height)
+                    }
+                }
             } catch (e: Exception) {
                 Toast.makeText(context, "Không mở được camera: ${e.message}", Toast.LENGTH_LONG).show()
             }

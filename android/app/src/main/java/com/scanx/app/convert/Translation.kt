@@ -70,6 +70,47 @@ object Translation {
         return DocModel(doc.title + titleSuffix, pages)
     }
 
+    /**
+     * Dịch SONG NGỮ (bản 0.7): GIỮ nguyên đoạn/ô gốc, chèn bản dịch (in nghiêng, để phân biệt) ngay
+     * sau — khác với [apply] (thay hẳn chữ gốc bằng bản dịch). Ô bảng: đoạn dịch thêm vào CUỐI danh
+     * sách đoạn của chính ô đó (đã hỗ trợ nhiều đoạn/dòng trong 1 ô sẵn) → Word/Excel/PowerPoint xuống
+     * dòng tự nhiên trong ô, không phá lưới bảng. Đoạn văn thường: chèn thêm 1 khối đoạn ngay sau khối
+     * gốc, đặt ngay dưới trong luồng văn bản (Word/Excel dựng theo luồng nên không lệch trang; riêng
+     * PowerPoint định vị theo toạ độ tuyệt đối nên có thể hơi sát khối tiếp theo — hạn chế đã biết).
+     */
+    fun applyBilingual(doc: DocModel, translated: Map<String, String>, titleSuffix: String = " (song ngữ)"): DocModel {
+        fun translatedOrNull(id: String, p: Paragraph): Paragraph? {
+            val t = translated[id]?.trim()
+            if (t.isNullOrEmpty() || t == p.text.trim()) return null
+            return p.copy(text = t, lang = TARGET, italic = true, lineBoxes = emptyList())
+        }
+        val pages = doc.pages.mapIndexed { pi, page ->
+            val blocks = ArrayList<Block>()
+            page.blocks.forEachIndexed { bi, b ->
+                when (b) {
+                    is ParagraphBlock -> {
+                        blocks.add(b)
+                        translatedOrNull("g${pi}b$bi", b.paragraph)?.let { t ->
+                            val ob = b.paragraph.box
+                            blocks.add(ParagraphBlock(t.copy(box = Box(ob.left, ob.bottom, ob.right, ob.bottom + ob.height), spaceBeforePx = 0f)))
+                        }
+                    }
+                    is TableBlock -> {
+                        val cells = b.cells.map { c ->
+                            val extra = ArrayList<Paragraph>()
+                            c.paragraphs.forEachIndexed { k, p -> translatedOrNull("g${pi}b${bi}r${c.row}c${c.col}k$k", p)?.let { extra.add(it) } }
+                            if (extra.isEmpty()) c else c.copy(paragraphs = c.paragraphs + extra)
+                        }
+                        blocks.add(TableBlock(b.box, b.colEdges, b.rowEdges, cells, b.bordered, b.spaceBeforePx))
+                    }
+                    is ImageBlock -> blocks.add(b)
+                }
+            }
+            DocPage(page.width, page.height, blocks, page.content, page.pageJpeg, page.ptPerPx, page.ocrConfidence)
+        }
+        return DocModel(doc.title + titleSuffix, pages)
+    }
+
     /** Văn bản thuần của bản dịch (xuất .txt / xem nhanh), giữ thứ tự đọc, bảng tách bằng tab. */
     fun plainText(doc: DocModel): String {
         val sb = StringBuilder()

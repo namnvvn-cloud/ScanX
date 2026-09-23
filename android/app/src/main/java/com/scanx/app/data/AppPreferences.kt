@@ -35,19 +35,24 @@ class AppPreferences(context: Context) {
         get() = prefs.getBoolean(KEY_FLASH, false)
         set(value) = prefs.edit().putBoolean(KEY_FLASH, value).apply()
 
-    /** API key Anthropic của người dùng cho "AI Cloud" (chỉ lưu trong bộ nhớ riêng của app trên máy). */
+    /**
+     * API key Anthropic của người dùng cho "AI Cloud" — mã hoá bằng Android Keystore trước khi lưu
+     * (xem [KeystoreCrypto]), chỉ tồn tại trong bộ nhớ riêng của app trên máy. Key đã lưu dạng chữ
+     * thường (bản cũ, trước khi có mã hoá) tự động được đọc đúng và ghi đè lại thành bản mã hoá ngay
+     * lần đọc đầu tiên — không mất key đã nhập trước đó.
+     */
     var cloudApiKey: String
-        get() = prefs.getString(KEY_CLOUD_KEY, "").orEmpty()
-        set(value) = prefs.edit().putString(KEY_CLOUD_KEY, value.trim()).apply()
+        get() = readSecret(KEY_CLOUD_KEY)
+        set(value) = writeSecret(KEY_CLOUD_KEY, value.trim())
 
     var cloudModel: String
         get() = prefs.getString(KEY_CLOUD_MODEL, "claude-sonnet-5").orEmpty().ifBlank { "claude-sonnet-5" }
         set(value) = prefs.edit().putString(KEY_CLOUD_MODEL, value).apply()
 
-    /** API key Gemini của người dùng (miễn phí, aistudio.google.com/apikey) — chỉ dùng để dịch chữ. */
+    /** API key Gemini của người dùng (miễn phí, aistudio.google.com/apikey) — chỉ dùng để dịch chữ; mã hoá như [cloudApiKey]. */
     var geminiApiKey: String
-        get() = prefs.getString(KEY_GEMINI_KEY, "").orEmpty()
-        set(value) = prefs.edit().putString(KEY_GEMINI_KEY, value.trim()).apply()
+        get() = readSecret(KEY_GEMINI_KEY)
+        set(value) = writeSecret(KEY_GEMINI_KEY, value.trim())
 
     var geminiModel: String
         get() = prefs.getString(KEY_GEMINI_MODEL, "gemini-2.5-flash").orEmpty().ifBlank { "gemini-2.5-flash" }
@@ -65,7 +70,26 @@ class AppPreferences(context: Context) {
         }.getOrDefault(ViewMode.GRID)
         set(value) = prefs.edit().putString(KEY_VIEW_MODE, value.name).apply()
 
+    /** Ghi giá trị đã mã hoá, có tiền tố [ENC_PREFIX] để phân biệt với key cũ lưu chữ thường. */
+    private fun writeSecret(key: String, value: String) {
+        val stored = if (value.isEmpty()) "" else ENC_PREFIX + KeystoreCrypto.encrypt(value)
+        prefs.edit().putString(key, stored).apply()
+    }
+
+    /**
+     * Đọc key: nếu có tiền tố [ENC_PREFIX] thì giải mã bình thường; nếu không (key nhập từ bản cũ,
+     * trước khi có mã hoá) thì dùng nguyên văn VÀ ghi đè lại thành bản mã hoá luôn — chỉ 1 lần.
+     */
+    private fun readSecret(key: String): String {
+        val raw = prefs.getString(key, "").orEmpty()
+        if (raw.isEmpty()) return ""
+        if (raw.startsWith(ENC_PREFIX)) return KeystoreCrypto.decrypt(raw.removePrefix(ENC_PREFIX))
+        writeSecret(key, raw) // key cũ chưa mã hoá → nâng cấp ngầm, không cần người dùng nhập lại
+        return raw
+    }
+
     companion object {
+        private const val ENC_PREFIX = "enc1:"
         private const val KEY_CAPTURE_MODE = "capture_mode"
         private const val KEY_STABLE_FRAMES = "auto_capture_stable_frames"
         private const val KEY_AUTO_OCR = "auto_ocr_enabled"

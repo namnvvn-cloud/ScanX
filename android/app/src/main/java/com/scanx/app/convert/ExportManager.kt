@@ -137,7 +137,12 @@ class ExportManager(private val context: Context) {
         source: (TextRecognizer, (Int, Int, Bitmap) -> DocPage) -> List<DocPage>,
     ): File = writeDoc(buildDoc(title, cloud, onProgress, source), base, format)
 
-    /** Dựng mô hình bố cục (bảng, đoạn, ghi chú…) cho mọi trang của nguồn. */
+    /**
+     * Dựng mô hình bố cục (bảng, đoạn, ghi chú…) cho mọi trang của nguồn. Khi có AI Cloud: đi 2 lượt —
+     * lượt 1 dựng bố cục + gom sẵn ảnh JPEG nhỏ gọn từng trang (giải phóng Bitmap gốc ngay, không giữ
+     * trong RAM), lượt 2 gọi AI theo LÔ [BATCH_SIZE] trang/lần (bản 0.7 — trước đó gọi riêng từng
+     * trang) để giảm số lần gọi mạng, nhanh hơn với tài liệu nhiều trang viết tay.
+     */
     private fun buildDoc(
         title: String,
         cloud: CloudConfig?,
@@ -149,15 +154,22 @@ class ExportManager(private val context: Context) {
         try {
             val extractor = PageLayoutExtractor(ocr)
             val client = cloud?.let { CloudAiClient(it.apiKey, it.model) }
+            val jpegBuffer = client?.let { ArrayList<ByteArray>() }
             var lowConfidencePages = 0
-            val pages = source(recognizer) { index, total, bmp ->
+            val rawPages = source(recognizer) { index, total, bmp ->
                 onProgress(index + 1, total)
                 val input = runBlocking { extractor.extract(bmp) }
                 val page = LayoutAnalyzer.analyze(input)
                 if (page.ocrConfidence < 0.75f) lowConfidencePages++
-                if (client != null) client.transcribe(page, bmp) else page
+                if (client != null && jpegBuffer != null) jpegBuffer.add(client.encode(bmp))
+                page
             }
-            if (pages.isEmpty()) error("Không có trang nào để chuyển đổi")
+            if (rawPages.isEmpty()) error("Không có trang nào để chuyển đổi")
+            val pages = if (client != null && jpegBuffer != null) {
+                transcribeInBatches(client, rawPages, jpegBuffer, onProgress)
+            } else {
+                rawPages
+            }
             if (client == null && lowConfidencePages > 0) {
                 lastNotice = "Có $lowConfidencePages trang chữ viết tay/khó đọc — bật \"AI Cloud\" khi xuất để nhận dạng chính xác."
             }
@@ -165,6 +177,26 @@ class ExportManager(private val context: Context) {
         } finally {
             ocr.close()
         }
+    }
+
+    /** Gọi [CloudAiClient.transcribeBatch] theo từng lô [BATCH_SIZE] trang, báo lại tiến độ theo số
+     *  trang đã xong sau mỗi lô (không đứng hình tới khi xong hết mới nhảy số). */
+    private fun transcribeInBatches(
+        client: CloudAiClient,
+        pages: List<DocPage>,
+        jpegs: List<ByteArray>,
+        onProgress: (Int, Int) -> Unit,
+    ): List<DocPage> {
+        val total = pages.size
+        val out = ArrayList<DocPage>(total)
+        var index = 0
+        while (index < total) {
+            val end = minOf(index + BATCH_SIZE, total)
+            out.addAll(client.transcribeBatch(pages.subList(index, end), jpegs.subList(index, end)))
+            onProgress(end, total)
+            index = end
+        }
+        return out
     }
 
     private fun writeDoc(doc: DocModel, base: String, format: ExportFormat): File {
@@ -193,6 +225,7 @@ class ExportManager(private val context: Context) {
         title: String,
         engine: TranslationEngine,
         cloud: CloudConfig?,
+        bilingual: Boolean = false,
         output: ExportFormat,
         onStatus: (String) -> Unit,
     ): File = withContext(Dispatchers.IO) {
@@ -204,7 +237,7 @@ class ExportManager(private val context: Context) {
             if (masters.isNotEmpty()) forEachMaster(masters, consumer)
             else renderPdf(legacyPdf) { i, n, bmp -> withUpright(recognizer, bmp) { consumer(i, n, it) } }
         }
-        translateAndWrite(doc, safeName(title), engine, output, onStatus)
+        translateAndWrite(doc, safeName(title), engine, bilingual, output, onStatus)
     }
 
     /** Dịch file PDF/ảnh import từ máy sang tiếng Việt. */
@@ -213,6 +246,7 @@ class ExportManager(private val context: Context) {
         title: String,
         engine: TranslationEngine,
         cloud: CloudConfig?,
+        bilingual: Boolean = false,
         output: ExportFormat,
         onStatus: (String) -> Unit,
     ): File = withContext(Dispatchers.IO) {
@@ -240,10 +274,14 @@ class ExportManager(private val context: Context) {
                 }
             }
         }
-        translateAndWrite(doc, safeName(title), engine, output, onStatus)
+        translateAndWrite(doc, safeName(title), engine, bilingual, output, onStatus)
     }
 
-    private suspend fun translateAndWrite(doc: DocModel, base: String, engine: TranslationEngine, output: ExportFormat, onStatus: (String) -> Unit): File {
+    /**
+     * [bilingual] = true (bản 0.7): GIỮ nguyên đoạn/ô gốc, chèn bản dịch (in nghiêng) ngay sau thay vì
+     * thay thế chữ — xem [Translation.applyBilingual]. Tên file thêm hậu tố khác để phân biệt.
+     */
+    private suspend fun translateAndWrite(doc: DocModel, base: String, engine: TranslationEngine, bilingual: Boolean, output: ExportFormat, onStatus: (String) -> Unit): File {
         val items = Translation.collect(doc)
         if (items.isEmpty()) {
             lastNotice = "Tài liệu đã là tiếng Việt (hoặc không có chữ cần dịch) — xuất nguyên văn."
@@ -255,7 +293,8 @@ class ExportManager(private val context: Context) {
         }
         val missing = items.count { translated[it.id].isNullOrBlank() }
         if (items.isNotEmpty() && missing > 0) lastNotice = "Còn $missing đoạn chưa dịch được (giữ nguyên văn gốc)."
-        return writeDoc(Translation.apply(doc, translated), base + "_TiengViet", output)
+        val translatedDoc = if (bilingual) Translation.applyBilingual(doc, translated) else Translation.apply(doc, translated)
+        return writeDoc(translatedDoc, base + (if (bilingual) "_SongNgu" else "_TiengViet"), output)
     }
 
     private fun <T> forEachMaster(masters: List<File>, consumer: (Int, Int, Bitmap) -> T): List<T> =
@@ -319,4 +358,10 @@ class ExportManager(private val context: Context) {
 
     private fun safeName(title: String): String =
         title.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim().ifBlank { "ScanX" }.take(80)
+
+    companion object {
+        /** Số trang gộp trong 1 lần gọi AI Cloud (bản 0.7) — cân bằng giữa giảm số lần gọi mạng và giữ
+         *  prompt/kích thước ảnh đính kèm vừa phải để AI đọc chính xác từng trang. */
+        private const val BATCH_SIZE = 3
+    }
 }

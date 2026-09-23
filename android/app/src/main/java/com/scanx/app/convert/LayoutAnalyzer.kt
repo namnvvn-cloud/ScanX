@@ -37,7 +37,9 @@ object LayoutAnalyzer {
         val grids = TableDetector.detect(rules, input.width, input.height)
 
         // --- 1. Tách từ thuộc bảng / ngoài bảng ---------------------------------------------
-        val cellWords = grids.map { HashMap<Int, MutableList<Pair<OcrWord, Float>>>() }
+        // Mỗi từ mang theo (độ dày nét, chữ nghiêng) của DÒNG OCR gốc chứa nó — dùng suy đậm/nghiêng khi
+        // gộp từ thành dòng/đoạn trong ô bảng ([cellParagraphs]).
+        val cellWords = grids.map { HashMap<Int, MutableList<Triple<OcrWord, Float, Boolean>>>() }
         val freeLines = ArrayList<OcrLine>()
         for (line in input.lines) {
             val words = line.words.ifEmpty { listOf(OcrWord(line.text, line.box)) }
@@ -47,14 +49,14 @@ object LayoutAnalyzer {
                 if (gi >= 0) {
                     val g = grids[gi]
                     val id = g.anchorOf[g.rowIndexOf(word.box.cy)][g.colIndexOf(word.box.cx)]
-                    cellWords[gi].getOrPut(id) { mutableListOf() }.add(word to line.strokeWidth)
+                    cellWords[gi].getOrPut(id) { mutableListOf() }.add(Triple(word, line.strokeWidth, line.italic))
                 } else {
                     rest.add(word)
                 }
             }
             if (rest.isNotEmpty()) {
                 val box = Box.unionOf(rest.map { it.box })!!
-                freeLines.add(OcrLine(rest.joinToString(" ") { it.text }, box, rest, line.strokeWidth, line.color, line.confidence, line.lang))
+                freeLines.add(OcrLine(rest.joinToString(" ") { it.text }, box, rest, line.strokeWidth, line.color, line.confidence, line.lang, line.italic))
             }
         }
 
@@ -132,7 +134,7 @@ object LayoutAnalyzer {
                     j++
                 }
                 flushParagraphs()
-                blocks.add(buildColumnRegion(regionBands.flatten(), gutters, contentBox, ptPerPx, ::isBold))
+                blocks.add(buildColumnRegion(regionBands, gutters, contentBox, ptPerPx, ::isBold))
                 i = j
             } else {
                 pending.add(band)
@@ -216,6 +218,7 @@ object LayoutAnalyzer {
                         if (last.box.width >= l.box.width) last.color else l.color,
                         min(last.confidence, l.confidence),
                         if (last.lang == l.lang || l.lang.isEmpty()) last.lang else if (last.lang.isEmpty()) l.lang else if (last.text.length >= l.text.length) last.lang else l.lang,
+                        italic = if (last.box.width >= l.box.width) last.italic else l.italic,
                     )
                 } else {
                     merged.add(l)
@@ -225,22 +228,35 @@ object LayoutAnalyzer {
         }
     }
 
+    /**
+     * Bảng không viền nhiều cột (header hành chính 2 cột, hoặc bản 0.7: danh sách/sổ chi tiêu không kẻ
+     * ô — mỗi dải ngang [regionBands] khớp gutters cột trở thành 1 HÀNG thật của bảng, không gộp hết
+     * vào 1 hàng như bản cũ). Dải chỉ có 1 mẩu (dòng nhìn ngược từ [pending]) vẫn thành 1 hàng, chỉ có
+     * 1 ô có chữ — đúng cách 1 dòng tiêu đề nằm trên phần chia cột.
+     */
     private fun buildColumnRegion(
-        lines: List<OcrLine>,
+        regionBands: List<List<OcrLine>>,
         gutters: List<Float>,
         content: Box,
         ptPerPx: Float,
         isBold: (Float) -> Boolean,
     ): TableBlock {
         val edges = listOf(content.left) + gutters + listOf(content.right)
-        val top = lines.minOf { it.box.top }
-        val bottom = lines.maxOf { it.box.bottom }
-        val cells = (0 until edges.size - 1).map { c ->
-            val colLines = lines.filter { it.box.cx >= edges[c] && it.box.cx < edges[c + 1] }.sortedBy { it.box.top }
-            val paras = colLines.map { l -> lineParagraph(l, edges[c], edges[c + 1], ptPerPx, isBold, centeredTolerance = 0.12f) }
-            TableCell(0, c, 1, 1, paras, VAlign.TOP)
+        val rowEdges = ArrayList<Float>()
+        rowEdges.add(regionBands.first().minOf { it.box.top })
+        for (k in 0 until regionBands.size - 1) {
+            rowEdges.add((regionBands[k].maxOf { it.box.bottom } + regionBands[k + 1].minOf { it.box.top }) / 2f)
         }
-        return TableBlock(Box(content.left, top, content.right, bottom), edges, listOf(top, bottom), cells, bordered = false, spaceBeforePx = 0f)
+        rowEdges.add(regionBands.last().maxOf { it.box.bottom })
+        val cells = ArrayList<TableCell>()
+        for ((r, band) in regionBands.withIndex()) {
+            for (c in 0 until edges.size - 1) {
+                val colLines = band.filter { it.box.cx >= edges[c] && it.box.cx < edges[c + 1] }.sortedBy { it.box.top }
+                val paras = colLines.map { l -> lineParagraph(l, edges[c], edges[c + 1], ptPerPx, isBold, centeredTolerance = 0.12f) }
+                cells.add(TableCell(r, c, 1, 1, paras, VAlign.TOP))
+            }
+        }
+        return TableBlock(Box(content.left, rowEdges.first(), content.right, rowEdges.last()), edges, rowEdges, cells, bordered = false, spaceBeforePx = 0f)
     }
 
     private fun lineParagraph(l: OcrLine, cl: Float, cr: Float, ptPerPx: Float, isBold: (Float) -> Boolean, centeredTolerance: Float): Paragraph {
@@ -253,7 +269,7 @@ object LayoutAnalyzer {
             else -> Align.LEFT
         }
         return Paragraph(
-            text = l.text, align = align, fontPt = lineFont(l, ptPerPx), bold = isBold(l.strokeWidth),
+            text = l.text, align = align, fontPt = lineFont(l, ptPerPx), bold = isBold(l.strokeWidth), italic = l.italic,
             indentPx = if (align == Align.LEFT) max(0f, lg) else 0f, spaceBeforePx = 0f, box = l.box,
             lineBoxes = listOf(l.box), color = l.color, lang = l.lang,
         )
@@ -281,6 +297,7 @@ object LayoutAnalyzer {
                         align = Align.JUSTIFY,
                         fontPt = snapSize(median(group.map { lineFontRaw(it, ptPerPx) }) ?: fontRaw(first.box.height, ptPerPx)),
                         bold = group.count { isBold(it.strokeWidth) } * 2 > group.size,
+                        italic = group.count { it.italic } * 2 > group.size,
                         indentPx = max(0f, restLeft - cl),
                         spaceBeforePx = 0f,
                         box = box,
@@ -320,7 +337,7 @@ object LayoutAnalyzer {
 
     /** Chữ trong 1 ô bảng: gom từ → dòng → đoạn; suy căn lề/căn dọc theo vị trí trong ô. */
     private fun cellParagraphs(
-        words: List<Pair<OcrWord, Float>>,
+        words: List<Triple<OcrWord, Float, Boolean>>,
         cell: Box,
         ptPerPx: Float,
         isBold: (Float) -> Boolean,
@@ -328,7 +345,7 @@ object LayoutAnalyzer {
         if (words.isEmpty()) return emptyList<Paragraph>() to VAlign.CENTER
         val medH = median(words.map { it.first.box.height }) ?: 10f
         val sorted = words.sortedBy { it.first.box.cy }
-        val rows = ArrayList<MutableList<Pair<OcrWord, Float>>>()
+        val rows = ArrayList<MutableList<Triple<OcrWord, Float, Boolean>>>()
         for (wd in sorted) {
             val row = rows.lastOrNull()
             if (row != null && abs(wd.first.box.cy - row.map { it.first.box.cy }.average().toFloat()) < medH * 0.5f) row.add(wd) else rows.add(mutableListOf(wd))
@@ -342,6 +359,7 @@ object LayoutAnalyzer {
                 majorityColor(byX.map { it.first.color to it.first.text.length }),
                 byX.minOf { it.first.confidence },
                 majorityLang(byX.map { it.first.lang to it.first.text.length }),
+                byX.count { it.third } * 2 > byX.size,
             )
         }
         val cw = max(1f, cell.width)
@@ -368,6 +386,7 @@ object LayoutAnalyzer {
                     align = align,
                     fontPt = snapSize(min(raw, max(8f, cap))),
                     bold = group.count { isBold(it.strokeWidth) } * 2 > group.size,
+                    italic = group.count { it.italic } * 2 > group.size,
                     indentPx = 0f, spaceBeforePx = 0f, box = box,
                     lineBoxes = group.map { it.box },
                     color = majorityColor(group.map { it.color to it.text.length }),

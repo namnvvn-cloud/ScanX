@@ -19,31 +19,62 @@ class CloudAiClient(private val apiKey: String, private val model: String) {
     class CloudAiException(message: String) : Exception(message)
 
     /** Trả về trang đã thay chữ bằng kết quả AI. Ném [CloudAiException] khi lỗi mạng/khoá/hạn mức. */
-    fun transcribe(page: DocPage, pageImage: Bitmap): DocPage {
-        val jpeg = encode(pageImage)
-        val prompt = CloudTranscription.prompt(page)
-        val body = JSONObject()
-            .put("model", model)
-            .put("max_tokens", 8192)
-            .put(
-                "messages",
-                JSONArray().put(
-                    JSONObject().put("role", "user").put(
-                        "content",
-                        JSONArray()
-                            .put(
-                                JSONObject().put("type", "image").put(
-                                    "source",
-                                    JSONObject().put("type", "base64").put("media_type", "image/jpeg")
-                                        .put("data", Base64.encodeToString(jpeg, Base64.NO_WRAP)),
-                                ),
-                            )
-                            .put(JSONObject().put("type", "text").put("text", prompt)),
-                    ),
+    fun transcribe(page: DocPage, pageImage: Bitmap): DocPage = transcribeBatch(listOf(page), listOf(encode(pageImage)))[0]
+
+    /**
+     * Đọc chữ NHIỀU trang trong 1 lần gọi Claude (gộp trang, bản 0.7): [jpegs] là ảnh từng trang đã
+     * mã hoá JPEG sẵn (xem [encode]) — gọi trước khi Bitmap bị recycle, chỉ giữ byte JPEG nhỏ gọn
+     * trong lúc gom lô, không giữ Bitmap gốc. Trả về danh sách trang đã thay chữ, đúng thứ tự.
+     * Ném [CloudAiException] khi lỗi mạng/khoá/hạn mức — áp dụng cho cả lô, không đọc được trang nào.
+     */
+    fun transcribeBatch(pages: List<DocPage>, jpegs: List<ByteArray>): List<DocPage> {
+        require(pages.size == jpegs.size) { "Số trang và số ảnh JPEG phải bằng nhau" }
+        if (pages.isEmpty()) return emptyList()
+        if (pages.size == 1) {
+            val body = JSONObject()
+                .put("model", model)
+                .put("max_tokens", 8192)
+                .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", imageContent(jpegs[0], CloudTranscription.prompt(pages[0])))))
+            return listOf(applyAnswer(pages[0], call(body)))
+        }
+        val content = JSONArray()
+        for (jpeg in jpegs) {
+            content.put(
+                JSONObject().put("type", "image").put(
+                    "source",
+                    JSONObject().put("type", "base64").put("media_type", "image/jpeg")
+                        .put("data", Base64.encodeToString(jpeg, Base64.NO_WRAP)),
                 ),
             )
-        return applyAnswer(page, call(body))
+        }
+        content.put(JSONObject().put("type", "text").put("text", CloudTranscription.batchPrompt(pages)))
+        val body = JSONObject()
+            .put("model", model)
+            .put("max_tokens", (6000 * pages.size).coerceAtMost(24000))
+            .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", content)))
+        val raw = call(body)
+        val start = raw.indexOf('{')
+        val end = raw.lastIndexOf('}')
+        if (start < 0 || end <= start) throw CloudAiException("AI trả về dữ liệu không đúng định dạng")
+        val json = JSONObject(raw.substring(start, end + 1))
+        val pagesJson = json.optJSONArray("pages") ?: throw CloudAiException("AI trả về dữ liệu không đúng định dạng (thiếu \"pages\")")
+        return pages.mapIndexed { i, page ->
+            val pj = pagesJson.optJSONObject(i) ?: return@mapIndexed page
+            val (answers, extras) = parseSlotsAndExtras(pj)
+            CloudTranscription.apply(page, answers, extras)
+        }
     }
+
+    private fun imageContent(jpeg: ByteArray, prompt: String): JSONArray =
+        JSONArray()
+            .put(
+                JSONObject().put("type", "image").put(
+                    "source",
+                    JSONObject().put("type", "base64").put("media_type", "image/jpeg")
+                        .put("data", Base64.encodeToString(jpeg, Base64.NO_WRAP)),
+                ),
+            )
+            .put(JSONObject().put("type", "text").put("text", prompt))
 
     /** Gửi 1 yêu cầu chỉ có chữ (vd dịch), trả về phần văn bản trả lời của mô hình. */
     fun complete(prompt: String, maxTokens: Int = 8192): String {
@@ -94,7 +125,11 @@ class CloudAiClient(private val apiKey: String, private val model: String) {
         val start = raw.indexOf('{')
         val end = raw.lastIndexOf('}')
         if (start < 0 || end <= start) throw CloudAiException("AI trả về dữ liệu không đúng định dạng")
-        val json = JSONObject(raw.substring(start, end + 1))
+        val (answers, extras) = parseSlotsAndExtras(JSONObject(raw.substring(start, end + 1)))
+        return CloudTranscription.apply(page, answers, extras)
+    }
+
+    private fun parseSlotsAndExtras(json: JSONObject): Pair<Map<String, String>, List<CloudTranscription.ExtraText>> {
         val answers = HashMap<String, String>()
         json.optJSONObject("slots")?.let { slots ->
             val keys = slots.keys()
@@ -117,11 +152,12 @@ class CloudAiClient(private val apiKey: String, private val model: String) {
                 )
             }
         }
-        return CloudTranscription.apply(page, answers, extras)
+        return answers to extras
     }
 
-    /** JPEG cạnh dài ≤ 2000 px, q85: đủ nét cho chữ viết tay, dưới giới hạn ảnh của API. */
-    private fun encode(bmp: Bitmap): ByteArray {
+    /** JPEG cạnh dài ≤ 2000 px, q85: đủ nét cho chữ viết tay, dưới giới hạn ảnh của API. Gọi trước khi
+     *  Bitmap gốc bị recycle để gom nhiều trang lại (chỉ giữ byte JPEG nhỏ gọn trong lúc gom lô). */
+    fun encode(bmp: Bitmap): ByteArray {
         val k = 2000f / maxOf(bmp.width, bmp.height)
         val scaled = if (k < 1f) Bitmap.createScaledBitmap(bmp, (bmp.width * k).toInt(), (bmp.height * k).toInt(), true) else bmp
         val bos = ByteArrayOutputStream()

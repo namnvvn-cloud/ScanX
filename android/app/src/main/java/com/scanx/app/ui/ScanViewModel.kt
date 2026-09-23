@@ -179,13 +179,13 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
      * miễn phí / Claude trả phí / ML Kit offline — thiếu API key thì tự lùi về ML Kit).
      * [cloudOcr] = đọc chữ bằng AI Cloud (Claude) trước khi dịch (chữ viết tay/mờ).
      */
-    fun translateDocument(id: String, engine: TranslationChoice, cloudOcr: Boolean, output: ExportFormat, onDone: (File) -> Unit) {
+    fun translateDocument(id: String, engine: TranslationChoice, cloudOcr: Boolean, bilingual: Boolean, output: ExportFormat, onDone: (File) -> Unit) {
         val doc = repository.getDocument(id) ?: return
         if (_exportStatus.value != null) return
         viewModelScope.launch {
             _exportStatus.value = "Đang chuẩn bị dịch…"
             try {
-                val file = exporter.translateDocument(repository, id, doc.title, translationEngine(engine), cloudConfig(cloudOcr), output) {
+                val file = exporter.translateDocument(repository, id, doc.title, translationEngine(engine), cloudConfig(cloudOcr), bilingual, output) {
                     _exportStatus.value = it
                 }
                 onDone(file)
@@ -199,13 +199,13 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** Dịch file PDF/ảnh import sang tiếng Việt. */
-    fun translateFiles(uris: List<Uri>, engine: TranslationChoice, cloudOcr: Boolean, output: ExportFormat, onDone: (File) -> Unit) {
+    fun translateFiles(uris: List<Uri>, engine: TranslationChoice, cloudOcr: Boolean, bilingual: Boolean, output: ExportFormat, onDone: (File) -> Unit) {
         if (uris.isEmpty() || _exportStatus.value != null) return
         viewModelScope.launch {
             _exportStatus.value = "Đang chuẩn bị dịch…"
             try {
                 val title = "ScanX dịch " + java.text.SimpleDateFormat("dd-MM-yyyy HHmm", Locale("vi", "VN")).format(java.util.Date())
-                val file = exporter.translateImported(uris, title, translationEngine(engine), cloudConfig(cloudOcr), output) {
+                val file = exporter.translateImported(uris, title, translationEngine(engine), cloudConfig(cloudOcr), bilingual, output) {
                     _exportStatus.value = it
                 }
                 onDone(file)

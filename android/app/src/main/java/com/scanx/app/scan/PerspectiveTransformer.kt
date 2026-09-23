@@ -19,8 +19,12 @@ import kotlin.math.max
  */
 object PerspectiveTransformer {
 
-    /** [normalizedCorners] TL, TR, BR, BL trong [0,1]. Trả về Mat RGBA master (người gọi release). */
-    fun warp(source: Bitmap, normalizedCorners: List<PointF>, maxSide: Int): Mat {
+    /**
+     * [normalizedCorners] TL, TR, BR, BL trong [0,1]. [focalLengthPx] tiêu cự thật (pixel, theo
+     * đường chéo ảnh [source]) đọc từ CameraCharacteristics — null thì [PageGeometry] tự ước lượng.
+     * Trả về Mat RGBA master (người gọi release).
+     */
+    fun warp(source: Bitmap, normalizedCorners: List<PointF>, maxSide: Int, focalLengthPx: Double? = null): Mat {
         val src = Mat()
         Utils.bitmapToMat(source, src)
         val w = source.width
@@ -28,7 +32,7 @@ object PerspectiveTransformer {
         var corners = normalizedCorners.map { doubleArrayOf(it.x * w.toDouble(), it.y * h.toDouble()) }
         corners = refineCorners(src, corners)
 
-        val (outW, outH) = PageGeometry.outputSize(corners, w, h, maxSide)
+        val (outW, outH) = PageGeometry.outputSize(corners, w, h, maxSide, focalLengthPx)
         val srcQuad = MatOfPoint2f(*corners.map { Point(it[0], it[1]) }.toTypedArray())
         val dstQuad = MatOfPoint2f(
             Point(0.0, 0.0),
