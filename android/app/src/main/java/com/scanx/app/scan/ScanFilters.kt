@@ -61,10 +61,17 @@ object ScanFilters {
         return out
     }
 
-    /** Đen trắng chất lượng cao (xám mịn). */
+    /**
+     * Đen trắng chất lượng cao (xám mịn). Có unsharp mask nhẹ (bán kính 2 px, 60%) để nét chữ đều
+     * nhau giữa giữa trang và mép trang — mép trang luôn hơi mờ hơn do ống kính và độ cong giấy.
+     */
     fun bwHq(rgba: Mat): Mat {
         val n = normalizedGray(rgba)
         Imgproc.medianBlur(n, n, 3)
+        val blur = Mat()
+        Imgproc.GaussianBlur(n, blur, Size(0.0, 0.0), 2.0)
+        Core.addWeighted(n, 1.6, blur, -0.6, 0.0, n)
+        blur.release()
         val bytes = ByteArray(n.cols() * n.rows())
         n.get(0, 0, bytes)
         val hist = IntArray(256)

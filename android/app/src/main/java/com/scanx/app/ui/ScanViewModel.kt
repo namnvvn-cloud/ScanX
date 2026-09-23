@@ -12,6 +12,13 @@ import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.scanx.app.convert.CloudConfig
 import com.scanx.app.convert.ExportFormat
 import com.scanx.app.convert.MultiScriptOcr
+import com.scanx.app.scan.OrientationDetector
+import org.opencv.android.Utils
+import org.opencv.core.Core
+import org.opencv.core.Mat
+import org.opencv.core.MatOfInt
+import org.opencv.imgcodecs.Imgcodecs
+import org.opencv.imgproc.Imgproc
 import com.scanx.app.convert.ClaudeTranslator
 import com.scanx.app.convert.MlKitTranslator
 import com.scanx.app.convert.TranslationEngine
@@ -261,6 +268,9 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
             _isProcessing.value = true
             try {
                 val masters = pages.map { it.masterFile }
+                // Tự xoay trang về đúng chiều đọc — làm ở bước lưu (không làm ngay sau mỗi lần chụp)
+                // để camera không bị khựng: OCR thử 2 chiều tốn 0,3–0,6 s mỗi trang.
+                withContext(Dispatchers.Default) { masters.forEach { autoRotateMaster(it) } }
                 val ocr = if (prefs.autoOcrEnabled) {
                     withContext(Dispatchers.Default) { recognizeMasters(masters) }
                 } else {
@@ -329,6 +339,35 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         var sample = 1
         while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxSide) sample *= 2
         return resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample }) }
+    }
+
+    /** Xoay file ảnh master về đúng chiều đọc nếu cần (ghi đè chính file đó). */
+    private suspend fun autoRotateMaster(file: File) {
+        runCatching {
+            val bmp = BitmapFactory.decodeFile(file.absolutePath) ?: return
+            val mat = Mat()
+            Utils.bitmapToMat(bmp, mat)
+            bmp.recycle()
+            try {
+                val rotation = OrientationDetector.detect(recognizer, mat)
+                if (rotation == 0) return
+                val rotated = Mat()
+                Core.rotate(
+                    mat, rotated,
+                    when (rotation) {
+                        90 -> Core.ROTATE_90_CLOCKWISE
+                        180 -> Core.ROTATE_180
+                        else -> Core.ROTATE_90_COUNTERCLOCKWISE
+                    },
+                )
+                val bgr = Mat()
+                Imgproc.cvtColor(rotated, bgr, Imgproc.COLOR_RGBA2BGR)
+                Imgcodecs.imwrite(file.absolutePath, bgr, MatOfInt(Imgcodecs.IMWRITE_JPEG_QUALITY, 92))
+                rotated.release(); bgr.release()
+            } finally {
+                mat.release()
+            }
+        }
     }
 
     private class OcrResult(val text: String, val layers: List<List<PdfTextLine>>)

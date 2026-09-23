@@ -17,13 +17,11 @@ import com.scanx.app.scan.AutoCaptureController
 import com.scanx.app.scan.CapturedPage
 import com.scanx.app.scan.DetectedQuad
 import com.scanx.app.scan.ImageProxyUtils
-import com.scanx.app.scan.OrientationDetector
+import com.scanx.app.scan.PageRectifier
 import com.scanx.app.scan.PerspectiveTransformer
 import com.scanx.app.scan.QuadSmoother
 import com.scanx.app.scan.ScanFilters
 import com.scanx.app.scan.maxCornerDistance
-import com.google.mlkit.vision.text.TextRecognition
-import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.scanx.app.data.PdfExportMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -44,7 +42,7 @@ import java.util.concurrent.Executors
  *  - Luồng phân tích (ImageAnalysis RGBA 640×480): AI DocAligner phát hiện 4 góc → làm mượt →
  *    [AutoCaptureController] (giữ yên 0,45 s — rất yên thì 0,27 s, đủ nét, đủ 4 góc, chỉ chụp TRANG MỚI).
  *  - Khi chụp: ảnh ~8 MP → AI chạy lại trên ảnh chụp → tinh chỉnh góc dưới-pixel → làm phẳng đúng
- *    tỉ lệ giấy thật → tự xoay đúng chiều đọc → kiểm tra trùng trang lần 2 trên ảnh đã làm phẳng →
+ *    tỉ lệ giấy thật → nắn dòng chữ ([PageRectifier]) → kiểm tra trùng trang lần 2 trên ảnh đã nắn →
  *    lưu master màu ra đĩa, hiển thị bản đen trắng (chế độ mặc định). Xử lý nối tiếp theo thứ tự chụp.
  */
 class ScanCameraViewModel(application: Application) : AndroidViewModel(application) {
@@ -53,7 +51,6 @@ class ScanCameraViewModel(application: Application) : AndroidViewModel(applicati
     private val smoother = QuadSmoother()
     private val autoController = AutoCaptureController(holdMillis = prefs.autoCaptureStableFrames * HOLD_MS_PER_STEP)
     private val captureExecutor = Executors.newSingleThreadExecutor()
-    private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     private val processMutex = Mutex()
     private val sessionDir: File get() = File(getApplication<Application>().cacheDir, "scan_session").apply { mkdirs() }
     private val captured = ArrayList<CapturedPage>()
@@ -233,13 +230,12 @@ class ScanCameraViewModel(application: Application) : AndroidViewModel(applicati
                     bitmap.recycle()
                     master = m
 
-                    val rotation = runCatching { OrientationDetector.detect(recognizer, m) }.getOrDefault(0)
-                    if (rotation != 0) {
-                        val r = Mat()
-                        Core.rotate(m, r, when (rotation) { 90 -> Core.ROTATE_90_CLOCKWISE; 180 -> Core.ROTATE_180; else -> Core.ROTATE_90_COUNTERCLOCKWISE })
+                    // Nắn lần 2 theo dòng chữ: bù nghiêng còn sót, kéo dòng chữ về ngang, cắt viền tối.
+                    val rect = PageRectifier.rectify(m)
+                    if (rect !== m) {
                         m.release()
-                        m = r
-                        master = r
+                        m = rect
+                        master = rect
                     }
 
                     // Kiểm tra trùng lần 2 trên ảnh đã làm phẳng + xoay đúng chiều (chính xác hơn khung xem trước).
@@ -324,7 +320,6 @@ class ScanCameraViewModel(application: Application) : AndroidViewModel(applicati
     override fun onCleared() {
         super.onCleared()
         captureExecutor.shutdown()
-        recognizer.close()
     }
 
     companion object {
