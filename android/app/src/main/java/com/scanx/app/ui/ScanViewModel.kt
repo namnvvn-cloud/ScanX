@@ -29,6 +29,7 @@ import com.scanx.app.data.AppPreferences
 import com.scanx.app.data.DocumentMeta
 import com.scanx.app.data.DocumentRepository
 import com.scanx.app.data.FolderMeta
+import com.scanx.app.data.PageFilter
 import com.scanx.app.data.SortOrder
 import com.scanx.app.data.PdfExportMode
 import com.scanx.app.data.PdfTextLine
@@ -294,7 +295,10 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                     OcrResult("", emptyList())
                 }
                 withContext(Dispatchers.IO) {
-                    repository.saveDocument(masters = masters, ocrText = ocr.text, folderId = _currentFolderId.value, textLayers = ocr.layers)
+                    repository.saveDocument(
+                        masters = masters, ocrText = ocr.text, folderId = _currentFolderId.value,
+                        textLayers = ocr.layers, pageFilters = pages.map { it.pageFilter },
+                    )
                 }
                 pages.forEach { if (!it.preview.isRecycled) it.preview.recycle() }
                 refresh()
@@ -457,6 +461,72 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
     fun getPdfFile(id: String) = repository.getPdfFile(id)
 
     fun getThumbnailFile(id: String) = repository.getThumbnailFile(id)
+
+    /** Danh sách file ảnh master từng trang của tài liệu đã lưu — dùng mở màn "Chỉnh sửa trang" (bản 0.8). */
+    fun getPageFiles(id: String) = repository.getPageFiles(id)
+
+    /** Bộ lọc riêng từng trang hiện tại (bản 0.8, tab "Bộ lọc"); null ở vị trí i = trang i dùng mặc định. */
+    fun getPageFilters(id: String) = repository.getPageFilters(id)
+
+    /** Đặt/bỏ bộ lọc riêng cho 1 trang đã lưu — dựng lại document.pdf/thumbnail ngay để hiển thị đúng. */
+    fun setPageFilter(id: String, pageIndex: Int, filter: PageFilter?) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { repository.setPageFilter(id, pageIndex, filter) }
+            refresh()
+        }
+    }
+
+    /**
+     * Ghi đè ảnh master của 1 trang đã lưu sau khi "Cắt và xoay" hoặc "Làm sạch" (bản 0.8), rồi dựng
+     * lại document.pdf/thumbnail. [newMaster] bị recycle sau khi dùng xong.
+     */
+    fun updatePageMaster(id: String, pageIndex: Int, newMaster: Bitmap, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            _isProcessing.value = true
+            try {
+                val bytes = withContext(Dispatchers.Default) {
+                    java.io.ByteArrayOutputStream().use { out ->
+                        newMaster.compress(Bitmap.CompressFormat.JPEG, 92, out)
+                        out.toByteArray()
+                    }
+                }
+                withContext(Dispatchers.IO) { repository.updatePageMaster(id, pageIndex, bytes) }
+                refresh()
+                onDone()
+            } finally {
+                newMaster.recycle()
+                _isProcessing.value = false
+            }
+        }
+    }
+
+    /**
+     * Áp kết quả màn "Chỉnh sửa trang" (bản 0.8) cho 1 trang đã lưu — gộp ảnh master mới (nếu có,
+     * sau Cắt xoay/Làm sạch) VÀ bộ lọc riêng trang vào MỘT lần ghi/dựng lại PDF, tránh chạy 2 coroutine
+     * ghi đè chồng chéo khi người dùng đổi cả ảnh lẫn bộ lọc trong cùng 1 lần chỉnh sửa.
+     * [newMaster] (nếu có) bị recycle sau khi dùng xong.
+     */
+    fun commitPageEdit(id: String, pageIndex: Int, newMaster: Bitmap?, filter: PageFilter?, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            _isProcessing.value = true
+            try {
+                val bytes = newMaster?.let { bmp ->
+                    withContext(Dispatchers.Default) {
+                        java.io.ByteArrayOutputStream().use { out ->
+                            bmp.compress(Bitmap.CompressFormat.JPEG, 92, out)
+                            out.toByteArray()
+                        }
+                    }
+                }
+                withContext(Dispatchers.IO) { repository.commitPageEdit(id, pageIndex, bytes, filter) }
+                refresh()
+                onDone()
+            } finally {
+                newMaster?.recycle()
+                _isProcessing.value = false
+            }
+        }
+    }
 
     private fun filterAndSort(
         docs: List<DocumentMeta>,

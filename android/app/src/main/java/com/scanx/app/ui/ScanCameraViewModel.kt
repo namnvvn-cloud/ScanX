@@ -2,6 +2,7 @@ package com.scanx.app.ui
 
 import android.app.Application
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.PointF
 import android.os.SystemClock
 import androidx.camera.core.ImageCapture
@@ -12,6 +13,7 @@ import androidx.lifecycle.viewModelScope
 import com.scanx.app.ScanXApp
 import com.scanx.app.data.AppPreferences
 import com.scanx.app.data.CaptureMode
+import com.scanx.app.data.PageFilter
 import com.scanx.app.scan.AiDocumentDetector
 import com.scanx.app.scan.AutoCaptureController
 import com.scanx.app.scan.CapturedPage
@@ -26,6 +28,7 @@ import com.scanx.app.data.PdfExportMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import org.opencv.android.Utils
 import org.opencv.core.Core
 import org.opencv.core.Mat
 import org.opencv.imgcodecs.Imgcodecs
@@ -35,6 +38,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.concurrent.Executors
 
 /**
@@ -226,7 +230,9 @@ class ScanCameraViewModel(application: Application) : AndroidViewModel(applicati
                     val refined = if (_isAiReady.value) {
                         val small = ImageProxyUtils.bitmapToSmallBgr(bitmap)
                         try {
-                            AiDocumentDetector.detect(small)
+                            // Bản 0.8: Net + khoá riêng với luồng xem trước ([ScanCameraViewModel.onFrameAnalyzed])
+                            // để không làm khựng khung hình trang tiếp theo trong lúc trang này còn đang xử lý.
+                            AiDocumentDetector.detectRefine(small)
                         } finally {
                             small.release()
                         }
@@ -299,6 +305,81 @@ class ScanCameraViewModel(application: Application) : AndroidViewModel(applicati
             _pages.value = captured.map { it.preview }
             removed.preview.recycle()
             if (captured.isEmpty()) lastPageSignature = null
+        }
+    }
+
+    /** Đọc ảnh master đầy đủ độ phân giải của 1 trang đã chụp — dùng mở màn "Chỉnh sửa trang" (bản
+     *  0.8). Chạy trên luồng nền (IO), gọi từ coroutine trong Compose. */
+    suspend fun getCapturedMaster(index: Int): Bitmap? = withContext(Dispatchers.IO) {
+        val file = synchronized(captured) { captured.getOrNull(index)?.masterFile } ?: return@withContext null
+        runCatching { BitmapFactory.decodeFile(file.absolutePath) }.getOrNull()
+    }
+
+    fun getCapturedPageFilter(index: Int): PageFilter? = synchronized(captured) { captured.getOrNull(index)?.pageFilter }
+
+    /** Đặt bộ lọc riêng cho 1 trang TRƯỚC khi lưu tài liệu (tab "Bộ lọc") — chỉ đổi metadata, cập
+     *  nhật luôn ảnh xem trước theo đúng bộ lọc vừa chọn (không đổi ảnh master trên đĩa). */
+    fun setCapturedPageFilter(index: Int, filter: PageFilter?) {
+        viewModelScope.launch(Dispatchers.Default) {
+            val page = synchronized(captured) { captured.getOrNull(index) } ?: return@launch
+            val master = runCatching { BitmapFactory.decodeFile(page.masterFile.absolutePath) }.getOrNull() ?: return@launch
+            val newPreview = try {
+                if (filter != null) ScanFilters.renderPageFilter(master, filter, PREVIEW_MAX_SIDE)
+                else ScanFilters.renderBitmap(master, PdfExportMode.DEFAULT, PREVIEW_MAX_SIDE)
+            } finally {
+                master.recycle()
+            }
+            synchronized(captured) {
+                if (index !in captured.indices || captured[index] !== page) { newPreview.recycle(); return@launch }
+                captured[index] = page.copy(preview = newPreview, pageFilter = filter)
+                page.preview.recycle()
+            }
+            _pages.value = synchronized(captured) { captured.map { it.preview } }
+        }
+    }
+
+    /**
+     * Ghi đè ảnh master của 1 trang TRƯỚC khi lưu tài liệu (bản 0.8, tab "Cắt và xoay"/"Làm sạch") —
+     * [newMaster] đã là kết quả cuối (đã cắt/xoay/vá). Cập nhật cả ảnh xem trước theo bộ lọc đang
+     * chọn của trang đó (nếu có).
+     */
+    fun updateCapturedPageMaster(index: Int, newMaster: Bitmap) {
+        commitCapturedPageEdit(index, newMaster, getCapturedPageFilter(index))
+    }
+
+    /**
+     * Áp kết quả màn "Chỉnh sửa trang" (bản 0.8) cho 1 trang TRƯỚC khi lưu tài liệu — gộp ảnh master
+     * mới (nếu có) VÀ bộ lọc riêng trang vào MỘT thao tác, tránh 2 coroutine ghi đè chồng chéo lên
+     * nhau khi người dùng đổi cả ảnh lẫn bộ lọc trong cùng 1 lần chỉnh sửa. [newMaster] null = ảnh
+     * không đổi (chỉ đổi bộ lọc) — khi có giá trị, hàm này nhận quyền sở hữu và sẽ recycle nó.
+     */
+    fun commitCapturedPageEdit(index: Int, newMaster: Bitmap?, filter: PageFilter?) {
+        viewModelScope.launch(Dispatchers.Default) {
+            val page = synchronized(captured) { captured.getOrNull(index) }
+            if (page == null) { newMaster?.recycle(); return@launch }
+            try {
+                if (newMaster != null) {
+                    val rgba = Mat()
+                    val bgr = Mat()
+                    Utils.bitmapToMat(newMaster, rgba)
+                    Imgproc.cvtColor(rgba, bgr, Imgproc.COLOR_RGBA2BGR)
+                    rgba.release()
+                    Imgcodecs.imwrite(page.masterFile.absolutePath, bgr, org.opencv.core.MatOfInt(Imgcodecs.IMWRITE_JPEG_QUALITY, 92))
+                    bgr.release()
+                }
+                val source = newMaster ?: BitmapFactory.decodeFile(page.masterFile.absolutePath) ?: return@launch
+                val newPreview = if (filter != null) ScanFilters.renderPageFilter(source, filter, PREVIEW_MAX_SIDE)
+                else ScanFilters.renderBitmap(source, PdfExportMode.DEFAULT, PREVIEW_MAX_SIDE)
+                if (source !== newMaster) source.recycle()
+                synchronized(captured) {
+                    if (index !in captured.indices || captured[index] !== page) { newPreview.recycle(); return@launch }
+                    captured[index] = page.copy(preview = newPreview, pageFilter = filter)
+                    page.preview.recycle()
+                }
+                _pages.value = synchronized(captured) { captured.map { it.preview } }
+            } finally {
+                newMaster?.recycle()
+            }
         }
     }
 

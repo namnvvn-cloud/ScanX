@@ -45,7 +45,9 @@ fun maxCornerDistance(a: DetectedQuad, b: DetectedQuad): Float {
  * Máy trạng thái tự chụp — nhịp kiểu Scanner Pro: chỉ chụp khi trang ĐỦ ĐIỀU KIỆN và LÀ TRANG MỚI.
  *
  * Điều kiện chụp (tất cả phải đạt liên tục trong [holdMillis], mặc định 0,45 s; nếu khung gần như
- * bất động và ảnh ổn định thì chụp sớm sau ~0,27 s — nhịp tương đương CamScanner/Genius Scan):
+ * bất động và ảnh ổn định thì chụp sớm sau ~0,27 s — nhịp tương đương CamScanner/Genius Scan; bản
+ * 0.8: máy gần như bất động tuyệt đối — vd. tì tay lên bàn, giá đỡ — ≥2 khung liên tiếp thì chỉ cần
+ * ~0,18 s, không nới lỏng bất kỳ điều kiện an toàn nào khác bên dưới):
  *  1. AI thấy đủ 4 góc với độ tin cậy ≥ [minConfidence]; cả 4 góc cách mép khung ≥ [edgeMargin]
  *     (không bị cắt mất góc giấy) và trang chiếm 12–97% khung.
  *  2. 4 góc đứng yên trong [stillTolerance]; nội dung trang không đổi giữa các khung (không có tay
@@ -72,6 +74,11 @@ class AutoCaptureController(
     /** Chụp sớm: khung gần như bất động (< 0,6% khung) + nội dung rất ổn định → chỉ cần 60% thời gian giữ. */
     private val earlyJitter: Float = 0.006f,
     private val earlyFactor: Float = 0.6f,
+    /** Bản 0.8: bậc "cực yên" (máy trên giá đỡ/tay rất vững) — lệch < 0,3% liên tục ≥2 khung kể từ
+     *  lúc bắt đầu giữ → chỉ cần 40% thời gian giữ (nhanh hơn cả mức "rất yên" ở trên). */
+    private val ultraJitter: Float = 0.003f,
+    private val ultraFactor: Float = 0.4f,
+    private val ultraMinFrames: Int = 2,
 ) {
     enum class Hint { NONE, NO_DOCUMENT, EDGE, HOLD_STILL, WAIT_NEW_PAGE }
 
@@ -88,6 +95,8 @@ class AutoCaptureController(
     private var holdStart = 0L
     private var holdMaxTexture = 0f
     private var veryStill = true
+    /** Số khung liên tiếp (kể từ lúc bắt đầu giữ) lệch dưới [ultraJitter] — bản 0.8. */
+    private var ultraStableStreak = 0
     private var prevSignature: FloatArray? = null
 
     private var lastCaptureAt = 0L
@@ -133,15 +142,24 @@ class AutoCaptureController(
             holdStart = nowMillis
             holdMaxTexture = texture
             veryStill = true
+            ultraStableStreak = 0
             return Decision(0f, false, false, Hint.HOLD_STILL, holdStarted = true)
         }
         if (texture > holdMaxTexture) holdMaxTexture = texture
         // Còn "rất yên" nếu mọi khung từ lúc bắt đầu giữ đều lệch < earlyJitter và nội dung gần như trùng khớp.
         val contentSteady = prevSig == null || signature == null || texture <= 0.02f ||
             AiDocumentDetector.pageSimilarity(prevSig, signature) > 0.9f
-        if (maxCornerDistance(a, quad) > earlyJitter || !contentSteady) veryStill = false
+        val cornerDelta = maxCornerDistance(a, quad)
+        if (cornerDelta > earlyJitter || !contentSteady) veryStill = false
+        // Bản 0.8: đếm số khung liên tiếp "cực yên" (ngưỡng chặt hơn earlyJitter) để chụp còn nhanh hơn nữa
+        // khi máy gần như bất động (giá đỡ, tì tay lên bàn) — không nới lỏng các điều kiện an toàn khác.
+        ultraStableStreak = if (veryStill && contentSteady && cornerDelta <= ultraJitter) ultraStableStreak + 1 else 0
 
-        val needed = if (veryStill) (holdMillis * earlyFactor).toLong() else holdMillis
+        val needed = when {
+            veryStill && ultraStableStreak >= ultraMinFrames -> (holdMillis * ultraFactor).toLong()
+            veryStill -> (holdMillis * earlyFactor).toLong()
+            else -> holdMillis
+        }
         val progress = ((nowMillis - holdStart).toFloat() / needed.coerceAtLeast(150L)).coerceIn(0f, 1f)
         val sharpEnough = holdMaxTexture < AiDocumentDetector.BLANK_TEXTURE * 2 || texture >= holdMaxTexture * sharpnessKeep
         if (progress >= 1f && sharpEnough && nowMillis - lastCaptureAt >= minIntervalMillis) {
@@ -176,6 +194,7 @@ class AutoCaptureController(
         anchor = null
         prevSignature = null
         holdMaxTexture = 0f
+        ultraStableStreak = 0
     }
 
     /** Gọi cả khi chụp thủ công để chế độ tự động không chụp lại đúng trang vừa chụp tay. */

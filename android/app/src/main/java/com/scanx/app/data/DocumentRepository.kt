@@ -76,6 +76,9 @@ class DocumentRepository(private val context: Context) {
         title: String? = null,
         textLayers: List<List<PdfTextLine>> = emptyList(),
         pdfMode: PdfExportMode = PdfExportMode.DEFAULT,
+        /** Bộ lọc riêng từng trang đã chọn ngay lúc review trước khi lưu (bản 0.8, tab "Bộ lọc"); phần
+         *  tử null = trang đó dùng đúng [pdfMode] như thường. */
+        pageFilters: List<PageFilter?> = emptyList(),
     ): DocumentMeta {
         require(masters.isNotEmpty()) { "Không có trang nào để lưu" }
         val id = UUID.randomUUID().toString()
@@ -93,8 +96,8 @@ class DocumentRepository(private val context: Context) {
 
         val createdAt = System.currentTimeMillis()
         val finalTitle = title ?: defaultTitleFor(createdAt)
-        PdfBuilder.buildPdf(stored, File(folder, "document.pdf"), pdfMode, finalTitle, textLayers)
-        PdfBuilder.saveThumbnail(stored.first(), pdfMode, getThumbnailFile(id))
+        PdfBuilder.buildPdf(stored, File(folder, "document.pdf"), pdfMode, finalTitle, textLayers, pageFilters)
+        PdfBuilder.saveThumbnail(stored.first(), pdfMode, getThumbnailFile(id), pageFilters.getOrNull(0))
 
         val meta = DocumentMeta(
             id = id,
@@ -105,17 +108,96 @@ class DocumentRepository(private val context: Context) {
             ocrText = ocrText,
             folderId = folderId,
             pdfMode = pdfMode.code,
+            pageFilters = pageFilters.map { it?.code },
         )
         writeMeta(folder, meta)
         return meta
     }
 
-    /** Dựng PDF của tài liệu [id] ở chế độ [mode] ra [outFile] (dùng khi xuất file). */
+    /** Dựng PDF của tài liệu [id] ở chế độ [mode] ra [outFile] (dùng khi xuất file); vẫn áp bộ lọc
+     *  riêng từng trang (nếu có, bản 0.8) đè lên [mode] cho đúng trang đã chỉnh trong app. */
     fun buildPdf(id: String, mode: PdfExportMode, outFile: File, title: String): Boolean {
         val pages = getPageFiles(id)
         if (pages.isEmpty()) return false
-        PdfBuilder.buildPdf(pages, outFile, mode, title, getTextLayers(id))
+        val pageFilters = getDocument(id)?.pageFilters?.map { PageFilter.fromCode(it) } ?: emptyList()
+        PdfBuilder.buildPdf(pages, outFile, mode, title, getTextLayers(id), pageFilters)
         return true
+    }
+
+    /** Bộ lọc riêng từng trang hiện tại (bản 0.8); null ở vị trí i = trang i dùng mặc định tài liệu. */
+    fun getPageFilters(id: String): List<PageFilter?> =
+        getDocument(id)?.pageFilters?.map { PageFilter.fromCode(it) } ?: emptyList()
+
+    /**
+     * Đặt (hoặc bỏ, nếu [filter] = null) bộ lọc riêng cho 1 trang — bản 0.8, màn "Chỉnh sửa trang" →
+     * tab "Bộ lọc" → Chấp nhận. Dựng lại ngay document.pdf (và thumbnail nếu là trang đầu) để
+     * DocumentDetailScreen/lưới My Scans hiển thị đúng, không cần mở lại tài liệu.
+     */
+    fun setPageFilter(id: String, pageIndex: Int, filter: PageFilter?) {
+        val folder = File(rootDir, id)
+        val meta = readMeta(folder) ?: return
+        val list = meta.pageFilters.toMutableList()
+        while (list.size <= pageIndex) list.add(null)
+        list[pageIndex] = filter?.code
+        val newMeta = meta.copy(pageFilters = list, modifiedAtEpochMillis = System.currentTimeMillis())
+        writeMeta(folder, newMeta)
+        regeneratePdfAndThumbnail(id, newMeta)
+    }
+
+    /** Dựng lại document.pdf (+ thumbnail nếu trang đầu có đổi) theo [meta] hiện tại — gọi sau khi
+     *  thay đổi bộ lọc riêng trang, hoặc sau khi thay ảnh master của 1 trang (Cắt xoay/Làm sạch). */
+    fun regeneratePdfAndThumbnail(id: String, meta: DocumentMeta? = null) {
+        val m = meta ?: getDocument(id) ?: return
+        val pages = getPageFiles(id)
+        if (pages.isEmpty()) return
+        val mode = PdfExportMode.fromCode(m.pdfMode)
+        val pageFilters = m.pageFilters.map { PageFilter.fromCode(it) }
+        PdfBuilder.buildPdf(pages, getPdfFile(id), mode, m.title, getTextLayers(id), pageFilters)
+        PdfBuilder.saveThumbnail(pages.first(), mode, getThumbnailFile(id), pageFilters.getOrNull(0))
+    }
+
+    /**
+     * Ghi đè ảnh master của 1 trang đã lưu (bản 0.8, sau "Cắt và xoay"/"Làm sạch") rồi dựng lại ngay
+     * document.pdf/thumbnail. Xoá lớp chữ OCR của riêng trang đó (toạ độ chữ cũ không còn khớp ảnh đã
+     * cắt/xoay lại) — tài liệu vẫn xem/in được bình thường, chỉ mất tìm-kiếm-chữ trên trang này cho
+     * tới khi quét lại; các trang khác không bị ảnh hưởng.
+     */
+    fun updatePageMaster(id: String, pageIndex: Int, jpegBytes: ByteArray) {
+        val pages = getPageFiles(id)
+        val file = pages.getOrNull(pageIndex) ?: return
+        file.writeBytes(jpegBytes)
+        clearPageTextLayer(id, pageIndex)
+        regeneratePdfAndThumbnail(id)
+    }
+
+    /**
+     * Áp cả bộ lọc riêng trang VÀ/HOẶC ảnh master mới của 1 trang trong MỘT lần ghi + dựng lại
+     * document.pdf/thumbnail (bản 0.8, màn "Chỉnh sửa trang" bấm "Xong"). Gộp thành 1 hàm để tránh 2
+     * coroutine ghi đè chồng chéo lên nhau khi người dùng đổi cả ảnh (Cắt xoay/Làm sạch) lẫn bộ lọc
+     * trong cùng 1 lần chỉnh sửa. [newMasterJpeg] = null nếu ảnh không đổi (chỉ đổi bộ lọc).
+     */
+    fun commitPageEdit(id: String, pageIndex: Int, newMasterJpeg: ByteArray?, filter: PageFilter?) {
+        val folder = File(rootDir, id)
+        val meta = readMeta(folder) ?: return
+        if (newMasterJpeg != null) {
+            val file = getPageFiles(id).getOrNull(pageIndex) ?: return
+            file.writeBytes(newMasterJpeg)
+            clearPageTextLayer(id, pageIndex)
+        }
+        val list = meta.pageFilters.toMutableList()
+        while (list.size <= pageIndex) list.add(null)
+        list[pageIndex] = filter?.code
+        val newMeta = meta.copy(pageFilters = list, modifiedAtEpochMillis = System.currentTimeMillis())
+        writeMeta(folder, newMeta)
+        regeneratePdfAndThumbnail(id, newMeta)
+    }
+
+    private fun clearPageTextLayer(id: String, pageIndex: Int) {
+        val folder = File(rootDir, id)
+        val layers = getTextLayers(id)
+        if (pageIndex !in layers.indices || layers[pageIndex].isEmpty()) return
+        val updated = layers.toMutableList().also { it[pageIndex] = emptyList() }
+        writeTextLayers(folder, updated)
     }
 
     private fun writeTextLayers(folder: File, layers: List<List<PdfTextLine>>) {
@@ -184,6 +266,7 @@ class DocumentRepository(private val context: Context) {
             put("isTrashed", meta.isTrashed)
             put("trashedAtEpochMillis", meta.trashedAtEpochMillis ?: JSONObject.NULL)
             put("pdfMode", meta.pdfMode ?: JSONObject.NULL)
+            put("pageFilters", JSONArray().apply { meta.pageFilters.forEach { put(it ?: JSONObject.NULL) } })
         }
         File(folder, "meta.json").writeText(json.toString())
     }
@@ -206,6 +289,9 @@ class DocumentRepository(private val context: Context) {
                 trashedAtEpochMillis = if (json.isNull("trashedAtEpochMillis")) null
                     else json.optLong("trashedAtEpochMillis").takeIf { it != 0L },
                 pdfMode = if (json.isNull("pdfMode")) null else json.optString("pdfMode", null),
+                pageFilters = json.optJSONArray("pageFilters")?.let { arr ->
+                    (0 until arr.length()).map { i -> if (arr.isNull(i)) null else arr.optString(i, null) }
+                } ?: emptyList(),
             )
         } catch (e: Exception) {
             null

@@ -57,6 +57,7 @@ import com.scanx.app.ui.screens.GeminiSettingsDialog
 import com.scanx.app.ui.screens.TranslateDialog
 import com.scanx.app.ui.screens.DocumentDetailScreen
 import com.scanx.app.ui.screens.HomeScreen
+import com.scanx.app.ui.screens.PageEditOverlayForDocument
 import com.scanx.app.ui.screens.ScanCameraScreen
 import com.scanx.app.ui.screens.ScanningSettingsScreen
 import com.scanx.app.ui.screens.SettingsScreen
@@ -119,6 +120,9 @@ class MainActivity : ComponentActivity() {
                     val translatePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
                         if (!uris.isNullOrEmpty()) translateUris = uris
                     }
+                    // Bản 0.8: đang mở màn "Chỉnh sửa trang" cho trang nào của tài liệu đã lưu (Screen.Detail).
+                    var editingDetailPage by remember { mutableStateOf<Int?>(null) }
+                    LaunchedEffect(screen) { editingDetailPage = null }
                     val prefs = remember { com.scanx.app.data.AppPreferences(context) }
 
                     LaunchedEffect(errorMessage) {
@@ -314,10 +318,23 @@ class MainActivity : ComponentActivity() {
                                     onDelete = {
                                         viewModel.moveToTrash(document.id)
                                         screen = Screen.Home
-                                    }
+                                    },
+                                    onEditPage = { pageIndex -> editingDetailPage = pageIndex },
                                 )
                             }
                         }
+                    }
+
+                    // Bản 0.8: màn "Chỉnh sửa trang" (Bộ lọc/Cắt xoay/Làm sạch) cho 1 trang của tài liệu đã lưu.
+                    val editingDoc = (screen as? Screen.Detail)?.documentId
+                    val editingPage = editingDetailPage
+                    if (editingDoc != null && editingPage != null) {
+                        PageEditOverlayForDocument(
+                            viewModel = viewModel,
+                            documentId = editingDoc,
+                            pageIndex = editingPage,
+                            onClose = { editingDetailPage = null },
+                        )
                     }
 
                     // Chọn định dạng đích sau khi chọn file cần chuyển đổi.

@@ -17,4 +17,7 @@ data class DocumentMeta(
     val trashedAtEpochMillis: Long? = null,
     /** Chế độ PDF đang lưu (A1/A2/B1/B2); null = tài liệu tạo từ bản cũ. */
     val pdfMode: String? = null,
+    /** Bộ lọc riêng từng trang (bản 0.8, màn "Chỉnh sửa trang" → tab "Bộ lọc"), theo [PageFilter.code].
+     *  Rỗng hoặc phần tử null = trang đó dùng đúng [pdfMode] của cả tài liệu như trước bản 0.8. */
+    val pageFilters: List<String?> = emptyList(),
 )

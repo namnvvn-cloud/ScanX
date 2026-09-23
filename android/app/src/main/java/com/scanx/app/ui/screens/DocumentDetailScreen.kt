@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Lock
@@ -101,6 +102,8 @@ fun DocumentDetailScreen(
     onOpenCloudSettings: () -> Unit,
     onOpenGeminiSettings: () -> Unit,
     onTranslate: (engine: TranslationChoice, cloudOcr: Boolean, bilingual: Boolean, output: ExportFormat, share: Boolean) -> Unit,
+    /** Mở màn "Chỉnh sửa trang" (bản 0.8: Bộ lọc/Cắt xoay/Làm sạch) cho trang [pageIndex]. */
+    onEditPage: (pageIndex: Int) -> Unit = {},
 ) {
     var showTranslate by remember { mutableStateOf(false) }
     val docMode = PdfExportMode.fromCode(document.pdfMode)
@@ -138,7 +141,7 @@ fun DocumentDetailScreen(
                 Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text(stringResource(R.string.detail_tab_text)) })
             }
             if (tab == 0) {
-                PdfPagesView(pdfFile, Modifier.fillMaxSize())
+                PdfPagesView(pdfFile, Modifier.fillMaxSize(), onEditPage = onEditPage)
             } else {
                 SelectionContainer {
                     Text(
@@ -218,7 +221,7 @@ private suspend fun renderPdfPage(file: File, index: Int, targetWidth: Int): Bit
 }
 
 @Composable
-private fun PdfPagesView(file: File, modifier: Modifier) {
+private fun PdfPagesView(file: File, modifier: Modifier, onEditPage: (Int) -> Unit = {}) {
     val pageCount by produceState(initialValue = -1, file) { value = pdfPageCount(file) }
     when {
         pageCount < 0 -> Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -228,25 +231,37 @@ private fun PdfPagesView(file: File, modifier: Modifier) {
             contentPadding = PaddingValues(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            items(pageCount) { index -> PdfPage(file, index) }
+            items(pageCount) { index -> PdfPage(file, index, onEdit = { onEditPage(index) }) }
         }
     }
 }
 
 @Composable
-private fun PdfPage(file: File, index: Int) {
+private fun PdfPage(file: File, index: Int, onEdit: () -> Unit = {}) {
     val bitmap by produceState<Bitmap?>(initialValue = null, file, index) { value = renderPdfPage(file, index, 1240) }
     Surface(shadowElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
-        val bmp = bitmap
-        if (bmp != null) {
-            Image(
-                bitmap = bmp.asImageBitmap(),
-                contentDescription = "Trang ${index + 1}",
-                modifier = Modifier.fillMaxWidth().aspectRatio(bmp.width.toFloat() / bmp.height),
-            )
-        } else {
-            Box(Modifier.fillMaxWidth().aspectRatio(0.707f).background(Color.White), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(modifier = Modifier.size(28.dp))
+        Box {
+            val bmp = bitmap
+            if (bmp != null) {
+                Image(
+                    bitmap = bmp.asImageBitmap(),
+                    contentDescription = "Trang ${index + 1}",
+                    modifier = Modifier.fillMaxWidth().aspectRatio(bmp.width.toFloat() / bmp.height),
+                )
+            } else {
+                Box(Modifier.fillMaxWidth().aspectRatio(0.707f).background(Color.White), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(modifier = Modifier.size(28.dp))
+                }
+            }
+            // Bản 0.8: mở màn "Chỉnh sửa trang" (Bộ lọc/Cắt xoay/Làm sạch) cho riêng trang này.
+            IconButton(
+                onClick = onEdit,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .background(Color.Black.copy(alpha = 0.45f), androidx.compose.foundation.shape.CircleShape),
+            ) {
+                Icon(Icons.Filled.Edit, contentDescription = "Chỉnh sửa trang ${index + 1}", tint = Color.White)
             }
         }
     }

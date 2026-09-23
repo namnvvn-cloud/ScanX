@@ -1,6 +1,7 @@
 package com.scanx.app.scan
 
 import android.graphics.Bitmap
+import com.scanx.app.data.PageFilter
 import com.scanx.app.data.PdfExportMode
 import com.scanx.app.data.PdfImage
 import org.opencv.android.Utils
@@ -135,6 +136,102 @@ object ScanFilters {
         hsv.release()
         return rgb
     }
+
+    /**
+     * Tăng tương phản cục bộ (CLAHE trên kênh L của Lab) sau khi đã chuẩn hoá màu — bản 0.8, chế độ
+     * "Bóng" trong màn Chỉnh sửa trang: khử bóng/ánh sáng không đều mạnh hơn [colorNormalized] một
+     * bậc, dùng cho ảnh chụp bảng trắng/giấy bóng/ánh sáng chéo mà chế độ Màu thường vẫn còn ám bóng.
+     */
+    fun shadowEnhanced(rgba: Mat): Mat {
+        val rgb = colorNormalized(rgba)
+        val lab = Mat()
+        Imgproc.cvtColor(rgb, lab, Imgproc.COLOR_RGB2Lab)
+        val chs = ArrayList<Mat>()
+        Core.split(lab, chs)
+        val clahe = Imgproc.createCLAHE(2.5, Size(8.0, 8.0))
+        clahe.apply(chs[0], chs[0])
+        Core.merge(chs, lab)
+        chs.forEach { it.release() }
+        Imgproc.cvtColor(lab, rgb, Imgproc.COLOR_Lab2RGB)
+        lab.release()
+        return rgb
+    }
+
+    /**
+     * Chế độ "Tự động" (bản 0.8): tự chọn Màu hay Đen trắng theo nội dung — đo độ bão hoà trung bình
+     * (kênh S của HSV) trên ảnh đã chuẩn hoá màu; trang gần như không màu (chữ đen/nền trắng) → Đen
+     * trắng cho nhẹ và nét; trang có màu thật (ảnh, biểu đồ màu, dấu đỏ nổi bật…) → giữ Màu.
+     */
+    private fun autoPick(rgba: Mat): Mat {
+        val rgb = colorNormalized(rgba)
+        val hsv = Mat()
+        Imgproc.cvtColor(rgb, hsv, Imgproc.COLOR_RGB2HSV)
+        val chs = ArrayList<Mat>()
+        Core.split(hsv, chs)
+        val meanSat = Core.mean(chs[1]).`val`[0]
+        chs.forEach { it.release() }
+        hsv.release()
+        return if (meanSat > AUTO_COLOR_SAT_THRESHOLD) {
+            rgb
+        } else {
+            rgb.release()
+            bwHq(rgba)
+        }
+    }
+
+    /** Dựng ảnh theo 1 trong 6 chế độ lọc riêng trang (bản 0.8). Trả về Mat 1 kênh (xám) hoặc 3 kênh (RGB). */
+    private fun renderPageFilterMat(rgba: Mat, filter: PageFilter): Mat = when (filter) {
+        PageFilter.ORIGINAL -> {
+            val rgb = Mat()
+            Imgproc.cvtColor(rgba, rgb, Imgproc.COLOR_RGBA2RGB)
+            rgb
+        }
+        PageFilter.AUTO -> autoPick(rgba)
+        PageFilter.COLOR -> colorNormalized(rgba)
+        PageFilter.BW -> bwHq(rgba)
+        PageFilter.GRAY -> normalizedGray(rgba)
+        PageFilter.SHADOW -> shadowEnhanced(rgba)
+    }
+
+    /** Ảnh xem trước theo bộ lọc riêng trang (bản 0.8), cạnh dài ≤ [maxSide]. Dùng cho màn Chỉnh sửa trang. */
+    fun renderPageFilter(master: Bitmap, filter: PageFilter, maxSide: Int): Bitmap {
+        val rgba = Mat()
+        Utils.bitmapToMat(master, rgba)
+        val k = maxSide.toDouble() / max(rgba.cols(), rgba.rows())
+        if (k < 1.0) Imgproc.resize(rgba, rgba, Size(rgba.cols() * k, rgba.rows() * k), 0.0, 0.0, Imgproc.INTER_AREA)
+        val out = renderPageFilterMat(rgba, filter)
+        val shown = Mat()
+        Imgproc.cvtColor(out, shown, if (out.channels() == 1) Imgproc.COLOR_GRAY2RGBA else Imgproc.COLOR_RGB2RGBA)
+        val bmp = Bitmap.createBitmap(shown.cols(), shown.rows(), Bitmap.Config.ARGB_8888)
+        Utils.matToBitmap(shown, bmp)
+        rgba.release(); out.release(); shown.release()
+        return bmp
+    }
+
+    /** Mã hoá theo bộ lọc riêng trang (bản 0.8) — dùng khi trang có override, chất lượng cố định (không
+     *  phân biệt nhỏ gọn/chất lượng cao như [encodeForPdf], vì đây là lựa chọn riêng của người dùng). */
+    fun encodePageOverride(master: Bitmap, filter: PageFilter): PdfImage {
+        val rgba = Mat()
+        Utils.bitmapToMat(master, rgba)
+        try {
+            val out = renderPageFilterMat(rgba, filter)
+            return if (out.channels() == 1) {
+                val img = PdfImage(out.cols(), out.rows(), PdfImage.Kind.JPEG_GRAY, jpeg(out, 82))
+                out.release()
+                img
+            } else {
+                val bgr = Mat()
+                Imgproc.cvtColor(out, bgr, Imgproc.COLOR_RGB2BGR)
+                val img = PdfImage(bgr.cols(), bgr.rows(), PdfImage.Kind.JPEG_RGB, jpeg(bgr, 85))
+                out.release(); bgr.release()
+                img
+            }
+        } finally {
+            rgba.release()
+        }
+    }
+
+    private const val AUTO_COLOR_SAT_THRESHOLD = 18.0
 
     /** Mã hoá ảnh master theo chế độ xuất PDF. */
     fun encodeForPdf(master: Bitmap, mode: PdfExportMode): PdfImage {

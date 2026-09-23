@@ -46,18 +46,24 @@ object AiDocumentDetector {
     private const val MIN_CORNER_CONFIDENCE = 0.35
     private const val MIN_AREA_RATIO = 0.08f
 
-    private val lock = Any()
+    private val lockMain = Any()
+    private val lockRefine = Any()
     @Volatile private var net: Net? = null
+    /** Bản 0.8: instance riêng cho bước tinh chỉnh góc sau khi chụp ([detectRefine]) — dùng
+     *  [Net] và khoá riêng với luồng xem trước ([detect]) để 2 việc không khoá chờ lẫn nhau (trước
+     *  đây dùng chung 1 Net + 1 khoá nên khi đang xử lý trang vừa chụp, khung hình xem trước có thể
+     *  bị khựng vài chục ms chờ tới lượt). Cả 2 chạy trên cùng model, chỉ tốn thêm vài MB RAM. */
+    @Volatile private var netRefine: Net? = null
     @Volatile private var loadFailed = false
 
-    val isReady: Boolean get() = net != null
+    val isReady: Boolean get() = net != null && netRefine != null
 
     /** Nạp model (copy từ assets ra filesDir vì OpenCV DNN đọc theo đường dẫn file). Gọi trên luồng nền. */
     fun ensureLoaded(context: Context): Boolean {
-        if (net != null) return true
+        if (net != null && netRefine != null) return true
         if (loadFailed) return false
-        synchronized(lock) {
-            if (net != null) return true
+        synchronized(lockMain) {
+            if (net != null && netRefine != null) return true
             return try {
                 val file = File(context.filesDir, ASSET_NAME)
                 if (!file.exists() || file.length() == 0L) {
@@ -65,10 +71,18 @@ object AiDocumentDetector {
                         file.outputStream().use { output -> input.copyTo(output) }
                     }
                 }
-                val loaded = Dnn.readNetFromONNX(file.absolutePath)
-                loaded.setPreferableBackend(Dnn.DNN_BACKEND_OPENCV)
-                loaded.setPreferableTarget(Dnn.DNN_TARGET_CPU)
-                net = loaded
+                if (net == null) {
+                    val loaded = Dnn.readNetFromONNX(file.absolutePath)
+                    loaded.setPreferableBackend(Dnn.DNN_BACKEND_OPENCV)
+                    loaded.setPreferableTarget(Dnn.DNN_TARGET_CPU)
+                    net = loaded
+                }
+                if (netRefine == null) {
+                    val loaded2 = Dnn.readNetFromONNX(file.absolutePath)
+                    loaded2.setPreferableBackend(Dnn.DNN_BACKEND_OPENCV)
+                    loaded2.setPreferableTarget(Dnn.DNN_TARGET_CPU)
+                    netRefine = loaded2
+                }
                 true
             } catch (e: Throwable) {
                 Log.e(TAG, "Không nạp được model DocAligner", e)
@@ -79,11 +93,21 @@ object AiDocumentDetector {
     }
 
     /**
-     * Phát hiện tài liệu trên ảnh BGR (CV_8UC3) đã xoay đứng. Ảnh bất kỳ kích thước — sẽ được co
-     * về 256×256 (co méo, đúng cách model được huấn luyện). Trả về null nếu không thấy tài liệu.
+     * Phát hiện tài liệu trên ảnh BGR (CV_8UC3) đã xoay đứng — dùng cho luồng xem trước real-time.
+     * Ảnh bất kỳ kích thước — sẽ được co về 256×256 (co méo, đúng cách model được huấn luyện). Trả
+     * về null nếu không thấy tài liệu.
      */
-    fun detect(bgrUpright: Mat): DetectedQuad? {
-        val model = net ?: return null
+    fun detect(bgrUpright: Mat): DetectedQuad? = runDetect(net, lockMain, bgrUpright)
+
+    /**
+     * Phát hiện lại trên ảnh vừa chụp (độ phân giải đầy đủ, đã thu nhỏ) để tinh chỉnh góc — dùng
+     * [Net] + khoá RIÊNG với [detect] (bản 0.8) để không làm khựng khung hình xem trước của trang
+     * tiếp theo trong lúc trang vừa chụp còn đang được xử lý.
+     */
+    fun detectRefine(bgrUpright: Mat): DetectedQuad? = runDetect(netRefine, lockRefine, bgrUpright)
+
+    private fun runDetect(model: Net?, lock: Any, bgrUpright: Mat): DetectedQuad? {
+        val m = model ?: return null
         val frameW = bgrUpright.cols()
         val frameH = bgrUpright.rows()
 
@@ -91,8 +115,8 @@ object AiDocumentDetector {
             val blob = Dnn.blobFromImage(
                 bgrUpright, 1.0 / 255.0, Size(INPUT_SIZE, INPUT_SIZE), Scalar(0.0, 0.0, 0.0), false, false,
             )
-            model.setInput(blob)
-            val out = model.forward()
+            m.setInput(blob)
+            val out = m.forward()
             blob.release()
             val images = ArrayList<Mat>()
             Dnn.imagesFromBlob(out, images)

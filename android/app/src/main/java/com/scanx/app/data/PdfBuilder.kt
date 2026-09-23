@@ -23,6 +23,8 @@ object PdfBuilder {
         mode: PdfExportMode,
         title: String,
         textLayers: List<List<PdfTextLine>> = emptyList(),
+        /** Bộ lọc riêng từng trang (bản 0.8); phần tử null = trang đó dùng đúng [mode] như cũ. */
+        pageFilters: List<PageFilter?> = emptyList(),
     ) {
         require(masters.isNotEmpty()) { "Không có trang nào để tạo PDF" }
         outFile.parentFile?.mkdirs()
@@ -33,7 +35,9 @@ object PdfBuilder {
                     ?: error("Không đọc được ảnh trang ${i + 1}")
                 try {
                     val (wPt, hPt) = pageSizePt(bmp.width, bmp.height)
-                    PdfPageSpec(wPt, hPt, ScanFilters.encodeForPdf(bmp, mode), textLayers.getOrNull(i).orEmpty())
+                    val override = pageFilters.getOrNull(i)
+                    val image = if (override != null) ScanFilters.encodePageOverride(bmp, override) else ScanFilters.encodeForPdf(bmp, mode)
+                    PdfPageSpec(wPt, hPt, image, textLayers.getOrNull(i).orEmpty())
                 } finally {
                     bmp.recycle()
                 }
@@ -57,12 +61,13 @@ object PdfBuilder {
         return if (portrait) shortPt to longPt else longPt to shortPt
     }
 
-    /** Ảnh thu nhỏ trang đầu (theo chế độ hiển thị) cho lưới My Scans. */
-    fun saveThumbnail(firstMaster: File, mode: PdfExportMode, outFile: File) {
+    /** Ảnh thu nhỏ trang đầu (theo chế độ hiển thị, hoặc bộ lọc riêng của trang đầu nếu có — bản 0.8)
+     *  cho lưới My Scans. */
+    fun saveThumbnail(firstMaster: File, mode: PdfExportMode, outFile: File, pageFilter: PageFilter? = null) {
         outFile.parentFile?.mkdirs()
         val opts = BitmapFactory.Options().apply { inSampleSize = 2 }
         val src = BitmapFactory.decodeFile(firstMaster.absolutePath, opts) ?: return
-        val thumb = ScanFilters.renderBitmap(src, mode, 480)
+        val thumb = if (pageFilter != null) ScanFilters.renderPageFilter(src, pageFilter, 480) else ScanFilters.renderBitmap(src, mode, 480)
         src.recycle()
         FileOutputStream(outFile).use { out -> thumb.compress(Bitmap.CompressFormat.JPEG, 85, out) }
         thumb.recycle()

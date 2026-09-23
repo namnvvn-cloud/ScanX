@@ -40,9 +40,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -72,6 +74,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.scanx.app.data.CaptureMode
+import com.scanx.app.data.PageFilter
 import com.scanx.app.scan.AutoCaptureController
 import com.scanx.app.scan.DetectedQuad
 import com.scanx.app.ui.ScanCameraViewModel
@@ -111,6 +114,8 @@ fun ScanCameraScreen(
     var showReview by remember { mutableStateOf(false) }
     var showDiscardConfirm by remember { mutableStateOf(false) }
     var flashFrame by remember { mutableStateOf(false) }
+    // Bản 0.8: đang mở màn "Chỉnh sửa trang" (Bộ lọc/Cắt xoay/Làm sạch) cho trang nào, null = không mở.
+    var editingIndex by remember { mutableStateOf<Int?>(null) }
 
     val previewView = remember {
         PreviewView(context).apply {
@@ -370,6 +375,17 @@ fun ScanCameraScreen(
             pages = pages,
             onDismiss = { showReview = false },
             onRemovePage = { index -> viewModel.removePage(index) },
+            onEditPage = { index -> editingIndex = index },
+        )
+    }
+
+    // Bản 0.8: màn "Chỉnh sửa trang" — vẽ SAU CÙNG để luôn nổi trên cả PageReviewDialog.
+    val editIndex = editingIndex
+    if (editIndex != null) {
+        PageEditOverlay(
+            viewModel = viewModel,
+            index = editIndex,
+            onClose = { editingIndex = null },
         )
     }
 
@@ -496,6 +512,7 @@ private fun PageReviewDialog(
     pages: List<Bitmap>,
     onDismiss: () -> Unit,
     onRemovePage: (Int) -> Unit,
+    onEditPage: (Int) -> Unit = {},
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -512,8 +529,23 @@ private fun PageReviewDialog(
                             contentDescription = "Trang ${index + 1}",
                             modifier = Modifier
                                 .size(100.dp)
-                                .background(Color.LightGray, RoundedCornerShape(8.dp)),
+                                .background(Color.LightGray, RoundedCornerShape(8.dp))
+                                .clickable { onEditPage(index) },
                         )
+                        IconButton(
+                            onClick = { onEditPage(index) },
+                            modifier = Modifier
+                                .align(Alignment.BottomStart)
+                                .size(28.dp)
+                                .background(Color.Black.copy(alpha = 0.6f), CircleShape),
+                        ) {
+                            Icon(
+                                Icons.Filled.Edit,
+                                contentDescription = "Chỉnh sửa trang ${index + 1}",
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
                         IconButton(
                             onClick = { onRemovePage(index) },
                             modifier = Modifier
@@ -536,4 +568,37 @@ private fun PageReviewDialog(
             TextButton(onClick = onDismiss) { Text("Đóng") }
         },
     )
+}
+
+/**
+ * Bản 0.8: tải ảnh master đầy đủ độ phân giải của trang [index] rồi mở [PageEditScreen] toàn màn
+ * hình. Đóng ([onClose]) sẽ tự giải phóng ảnh tạm đã tải nếu không dùng tới (huỷ, hoặc đã chấp nhận
+ * xong và [ScanCameraViewModel] đã nhận quyền sở hữu ảnh mới).
+ */
+@Composable
+private fun PageEditOverlay(viewModel: ScanCameraViewModel, index: Int, onClose: () -> Unit) {
+    var master by remember(index) { mutableStateOf<Bitmap?>(null) }
+    var filter by remember(index) { mutableStateOf<PageFilter?>(null) }
+    LaunchedEffect(index) {
+        filter = viewModel.getCapturedPageFilter(index)
+        master = viewModel.getCapturedMaster(index)
+    }
+    val m = master
+    if (m == null) {
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(color = Color.White)
+        }
+    } else {
+        PageEditScreen(
+            initialMaster = m,
+            initialFilter = filter,
+            pageLabel = "Trang ${index + 1}",
+            onCancel = { if (!m.isRecycled) m.recycle(); onClose() },
+            onDone = { finalMaster, finalFilter, masterChanged ->
+                viewModel.commitCapturedPageEdit(index, if (masterChanged) finalMaster else null, finalFilter)
+                if (!masterChanged && !finalMaster.isRecycled) finalMaster.recycle()
+                onClose()
+            },
+        )
+    }
 }
