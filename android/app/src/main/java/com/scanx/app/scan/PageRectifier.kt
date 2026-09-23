@@ -103,7 +103,7 @@ object PageRectifier {
         val mapX = Mat(BAND, w, CvType.CV_32F)
         val mapY = Mat(BAND, w, CvType.CV_32F)
         // Nắn ngang cố định theo mọi hàng → tính 1 lần, quy đổi luôn ra toạ độ ảnh gốc.
-        val rowX = FloatArray(w) { destX -> hMap[(destX / scale).toInt().coerceIn(0, smallW - 1)] * scale }
+        val rowX = FloatArray(w) { destX -> (hMap[(destX / scale).toInt().coerceIn(0, smallW - 1)] * scale).toFloat() }
         val rowY = FloatArray(w)
         var used = false
         var y0 = 0
