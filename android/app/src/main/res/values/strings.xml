@@ -149,6 +149,12 @@
     <string name="cloud_settings_desc">Dán API key Anthropic của bạn (tạo tại console.anthropic.com). Key chỉ lưu trên máy này. Ảnh trang chỉ được gửi đi khi bạn bật AI Cloud cho lần xuất đó; chi phí tính theo tài khoản Anthropic của bạn.</string>
     <string name="cloud_settings_key">API key (sk-ant-…)</string>
     <string name="cloud_settings_model">Model</string>
+    <string name="settings_gemini">Gemini (dịch miễn phí)</string>
+    <string name="settings_gemini_on">Đã cài đặt — dùng để dịch sang tiếng Việt, miễn phí</string>
+    <string name="settings_gemini_off">Chưa cài đặt API key</string>
+    <string name="gemini_settings_desc">Dán API key Gemini của bạn (lấy MIỄN PHÍ tại aistudio.google.com/apikey, không cần thẻ). Key chỉ lưu trên máy này, chỉ dùng để dịch chữ đã quét sang tiếng Việt — không dùng cho tính năng đọc chữ viết tay.</string>
+    <string name="gemini_settings_key">API key Gemini</string>
+    <string name="gemini_settings_model">Model (gõ tự do, hoặc chọn gợi ý bên dưới)</string>
     <string name="convert_use_cloud">Dùng AI Cloud đọc chữ viết tay</string>
     <string name="tools_convert_section">Chuyển đổi file</string>
     <string name="tools_convert_office">PDF/Ảnh → Office</string>
@@ -159,8 +165,10 @@
     <string name="translate_title">Dịch sang tiếng Việt</string>
     <string name="translate_desc">Giữ nguyên bố cục, bảng biểu; chỉ thay chữ bằng bản dịch. Tự nhận ngôn ngữ nguồn (Anh, Hàn, Nhật, Trung, Đức, Pháp…).</string>
     <string name="translate_engine">Máy dịch</string>
-    <string name="translate_engine_claude">Claude AI — chính xác nhất (hiểu ngữ cảnh, thuật ngữ)</string>
-    <string name="translate_engine_claude_off">Claude AI — cần nhập API key trong Cài đặt</string>
+    <string name="translate_engine_gemini">Gemini — miễn phí, chất lượng khá tốt (khuyên dùng)</string>
+    <string name="translate_engine_gemini_off">Gemini — miễn phí, cần nhập API key trong Cài đặt</string>
+    <string name="translate_engine_claude">Claude AI — chính xác nhất, trả phí (hiểu ngữ cảnh, thuật ngữ)</string>
+    <string name="translate_engine_claude_off">Claude AI — trả phí, cần nhập API key trong Cài đặt</string>
     <string name="translate_engine_mlkit">ML Kit offline — miễn phí, không gửi tài liệu ra ngoài (tải ~30 MB/ngôn ngữ lần đầu)</string>
     <string name="translate_cloud_ocr">Đọc chữ bằng AI Cloud trước khi dịch (chữ viết tay, chữ mờ)</string>
     <string name="translate_output">Định dạng bản dịch</string>

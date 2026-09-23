@@ -20,7 +20,9 @@ import org.opencv.core.MatOfInt
 import org.opencv.imgcodecs.Imgcodecs
 import org.opencv.imgproc.Imgproc
 import com.scanx.app.convert.ClaudeTranslator
+import com.scanx.app.convert.GeminiTranslator
 import com.scanx.app.convert.MlKitTranslator
+import com.scanx.app.convert.TranslationChoice
 import com.scanx.app.convert.TranslationEngine
 import com.scanx.app.convert.ExportManager
 import com.scanx.app.data.AppPreferences
@@ -101,6 +103,17 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         prefs.cloudModel = model
     }
 
+    /** Đã nhập API key Gemini (miễn phí) chưa. */
+    val isGeminiConfigured: Boolean get() = prefs.geminiApiKey.isNotBlank()
+
+    fun geminiApiKey(): String = prefs.geminiApiKey
+    fun geminiModel(): String = prefs.geminiModel
+
+    fun saveGeminiSettings(apiKey: String, model: String) {
+        prefs.geminiApiKey = apiKey
+        prefs.geminiModel = model
+    }
+
     private fun cloudConfig(useCloud: Boolean): CloudConfig? =
         if (useCloud && prefs.cloudApiKey.isNotBlank()) CloudConfig(prefs.cloudApiKey, prefs.cloudModel) else null
 
@@ -155,20 +168,24 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun translationEngine(useClaude: Boolean): TranslationEngine =
-        if (useClaude && prefs.cloudApiKey.isNotBlank()) ClaudeTranslator(prefs.cloudApiKey, prefs.cloudModel) else MlKitTranslator()
+    private fun translationEngine(choice: TranslationChoice): TranslationEngine = when {
+        choice == TranslationChoice.CLAUDE && prefs.cloudApiKey.isNotBlank() -> ClaudeTranslator(prefs.cloudApiKey, prefs.cloudModel)
+        choice == TranslationChoice.GEMINI && prefs.geminiApiKey.isNotBlank() -> GeminiTranslator(prefs.geminiApiKey, prefs.geminiModel)
+        else -> MlKitTranslator()
+    }
 
     /**
-     * Dịch tài liệu đã scan sang tiếng Việt (giữ bố cục). [useClaude] = dịch bằng Claude (cần API key),
-     * ngược lại ML Kit offline. [cloudOcr] = đọc chữ bằng AI Cloud trước khi dịch (chữ viết tay/mờ).
+     * Dịch tài liệu đã scan sang tiếng Việt (giữ bố cục). [engine] = máy dịch người dùng chọn (Gemini
+     * miễn phí / Claude trả phí / ML Kit offline — thiếu API key thì tự lùi về ML Kit).
+     * [cloudOcr] = đọc chữ bằng AI Cloud (Claude) trước khi dịch (chữ viết tay/mờ).
      */
-    fun translateDocument(id: String, useClaude: Boolean, cloudOcr: Boolean, output: ExportFormat, onDone: (File) -> Unit) {
+    fun translateDocument(id: String, engine: TranslationChoice, cloudOcr: Boolean, output: ExportFormat, onDone: (File) -> Unit) {
         val doc = repository.getDocument(id) ?: return
         if (_exportStatus.value != null) return
         viewModelScope.launch {
             _exportStatus.value = "Đang chuẩn bị dịch…"
             try {
-                val file = exporter.translateDocument(repository, id, doc.title, translationEngine(useClaude), cloudConfig(cloudOcr), output) {
+                val file = exporter.translateDocument(repository, id, doc.title, translationEngine(engine), cloudConfig(cloudOcr), output) {
                     _exportStatus.value = it
                 }
                 onDone(file)
@@ -182,13 +199,13 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** Dịch file PDF/ảnh import sang tiếng Việt. */
-    fun translateFiles(uris: List<Uri>, useClaude: Boolean, cloudOcr: Boolean, output: ExportFormat, onDone: (File) -> Unit) {
+    fun translateFiles(uris: List<Uri>, engine: TranslationChoice, cloudOcr: Boolean, output: ExportFormat, onDone: (File) -> Unit) {
         if (uris.isEmpty() || _exportStatus.value != null) return
         viewModelScope.launch {
             _exportStatus.value = "Đang chuẩn bị dịch…"
             try {
                 val title = "ScanX dịch " + java.text.SimpleDateFormat("dd-MM-yyyy HHmm", Locale("vi", "VN")).format(java.util.Date())
-                val file = exporter.translateImported(uris, title, translationEngine(useClaude), cloudConfig(cloudOcr), output) {
+                val file = exporter.translateImported(uris, title, translationEngine(engine), cloudConfig(cloudOcr), output) {
                     _exportStatus.value = it
                 }
                 onDone(file)

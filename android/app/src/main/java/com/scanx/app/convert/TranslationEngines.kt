@@ -13,6 +13,9 @@ interface TranslationEngine {
     suspend fun translate(items: List<Translation.Item>, context: String, onProgress: (Int, Int) -> Unit): Map<String, String>
 }
 
+/** 3 máy dịch người dùng có thể chọn ở hộp thoại "Dịch sang tiếng Việt". */
+enum class TranslationChoice { CLAUDE, GEMINI, MLKIT }
+
 /**
  * Dịch bằng Claude (mô hình ngôn ngữ lớn): hiểu ngữ cảnh cả tài liệu, thuật ngữ chuyên ngành, văn phong
  * hành chính/kỹ thuật tiếng Việt — chất lượng cao nhất hiện nay cho Hàn/Nhật/Trung/Anh/Đức/Pháp → Việt.
@@ -31,6 +34,32 @@ class ClaudeTranslator(apiKey: String, model: String) : TranslationEngine {
             val start = raw.indexOf('{')
             val end = raw.lastIndexOf('}')
             if (start < 0 || end <= start) throw CloudAiClient.CloudAiException("AI trả về bản dịch không đúng định dạng")
+            val json = JSONObject(raw.substring(start, end + 1))
+            for (it in batch) json.optString(it.id, "").takeIf { s -> s.isNotBlank() }?.let { s -> out[it.id] = s }
+        }
+        return out
+    }
+}
+
+/**
+ * Dịch bằng Gemini (Google AI Studio) — mô hình ngôn ngữ lớn, MIỄN PHÍ ở hạn mức cá nhân (lấy API key
+ * tại aistudio.google.com/apikey, không cần thẻ). Chất lượng thấp hơn Claude một chút với văn bản
+ * chuyên ngành phức tạp nhưng đủ tốt cho phần lớn tài liệu, và không tốn phí — ưu tiên mặc định khi
+ * người dùng đã cấu hình. Dùng chung [Translation.batches]/[Translation.llmPrompt] như Claude.
+ */
+class GeminiTranslator(apiKey: String, model: String) : TranslationEngine {
+    private val client = GeminiAiClient(apiKey, model)
+    override val label = "Gemini (miễn phí)"
+
+    override suspend fun translate(items: List<Translation.Item>, context: String, onProgress: (Int, Int) -> Unit): Map<String, String> {
+        val out = HashMap<String, String>()
+        val batches = Translation.batches(items)
+        batches.forEachIndexed { i, batch ->
+            onProgress(i + 1, batches.size)
+            val raw = client.complete(Translation.llmPrompt(batch, context), maxTokens = 16000)
+            val start = raw.indexOf('{')
+            val end = raw.lastIndexOf('}')
+            if (start < 0 || end <= start) throw GeminiAiClient.GeminiException("Gemini trả về bản dịch không đúng định dạng")
             val json = JSONObject(raw.substring(start, end + 1))
             for (it in batch) json.optString(it.id, "").takeIf { s -> s.isNotBlank() }?.let { s -> out[it.id] = s }
         }

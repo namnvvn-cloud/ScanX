@@ -24,21 +24,33 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.scanx.app.R
 import com.scanx.app.convert.ExportFormat
+import com.scanx.app.convert.TranslationChoice
 
 /**
- * Hộp thoại "Dịch sang tiếng Việt": chọn máy dịch (Claude nếu đã có API key, mặc định; ML Kit offline),
- * tuỳ chọn đọc chữ bằng AI Cloud trước khi dịch, định dạng bản dịch (Word giữ bố cục / TXT).
+ * Hộp thoại "Dịch sang tiếng Việt": chọn máy dịch trong 3 lựa chọn — Gemini (miễn phí, ưu tiên mặc
+ * định khi đã có key), Claude (trả phí, chính xác nhất), ML Kit (offline). Tuỳ chọn đọc chữ bằng AI
+ * Cloud (Claude) trước khi dịch, định dạng bản dịch (Word giữ bố cục / TXT).
  * [showShare] = hiện 2 nút Chia sẻ / Lưu (màn tài liệu); false = 1 nút Dịch (công cụ dịch file import).
  */
 @Composable
 fun TranslateDialog(
     cloudConfigured: Boolean,
+    geminiConfigured: Boolean,
     showShare: Boolean,
     onDismiss: () -> Unit,
     onOpenCloudSettings: () -> Unit,
-    onConfirm: (useClaude: Boolean, cloudOcr: Boolean, output: ExportFormat, share: Boolean) -> Unit,
+    onOpenGeminiSettings: () -> Unit,
+    onConfirm: (engine: TranslationChoice, cloudOcr: Boolean, output: ExportFormat, share: Boolean) -> Unit,
 ) {
-    var useClaude by remember { mutableStateOf(cloudConfigured) }
+    var engine by remember {
+        mutableStateOf(
+            when {
+                geminiConfigured -> TranslationChoice.GEMINI
+                cloudConfigured -> TranslationChoice.CLAUDE
+                else -> TranslationChoice.MLKIT
+            },
+        )
+    }
     var cloudOcr by remember { mutableStateOf(false) }
     var output by remember { mutableStateOf(ExportFormat.DOCX) }
     AlertDialog(
@@ -50,16 +62,26 @@ fun TranslateDialog(
                 Text(stringResource(R.string.translate_engine), style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 12.dp))
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth().clickable { if (cloudConfigured) useClaude = true else onOpenCloudSettings() },
+                    modifier = Modifier.fillMaxWidth().clickable { if (geminiConfigured) engine = TranslationChoice.GEMINI else onOpenGeminiSettings() },
                 ) {
-                    RadioButton(selected = useClaude && cloudConfigured, enabled = cloudConfigured, onClick = { useClaude = true })
+                    RadioButton(selected = engine == TranslationChoice.GEMINI, onClick = { if (geminiConfigured) engine = TranslationChoice.GEMINI else onOpenGeminiSettings() })
+                    Text(
+                        stringResource(if (geminiConfigured) R.string.translate_engine_gemini else R.string.translate_engine_gemini_off),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().clickable { if (cloudConfigured) engine = TranslationChoice.CLAUDE else onOpenCloudSettings() },
+                ) {
+                    RadioButton(selected = engine == TranslationChoice.CLAUDE, enabled = cloudConfigured, onClick = { engine = TranslationChoice.CLAUDE })
                     Text(
                         stringResource(if (cloudConfigured) R.string.translate_engine_claude else R.string.translate_engine_claude_off),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { useClaude = false }) {
-                    RadioButton(selected = !useClaude || !cloudConfigured, onClick = { useClaude = false })
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { engine = TranslationChoice.MLKIT }) {
+                    RadioButton(selected = engine == TranslationChoice.MLKIT, onClick = { engine = TranslationChoice.MLKIT })
                     Text(stringResource(R.string.translate_engine_mlkit), style = MaterialTheme.typography.bodyMedium)
                 }
                 if (cloudConfigured) {
@@ -78,13 +100,13 @@ fun TranslateDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(useClaude && cloudConfigured, cloudOcr && cloudConfigured, output, false) }) {
+            TextButton(onClick = { onConfirm(engine, cloudOcr && cloudConfigured, output, false) }) {
                 Text(stringResource(if (showShare) R.string.export_save else R.string.translate_action))
             }
         },
         dismissButton = {
             if (showShare) {
-                TextButton(onClick = { onConfirm(useClaude && cloudConfigured, cloudOcr && cloudConfigured, output, true) }) {
+                TextButton(onClick = { onConfirm(engine, cloudOcr && cloudConfigured, output, true) }) {
                     Text(stringResource(R.string.action_share))
                 }
             } else {

@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material3.HorizontalDivider
@@ -56,6 +57,8 @@ fun SettingsScreen(
     onAdvancedClick: () -> Unit,
     cloudConfigured: Boolean,
     onCloudAiClick: () -> Unit,
+    geminiConfigured: Boolean,
+    onGeminiClick: () -> Unit,
     onRecommendApp: () -> Unit,
     onComingSoon: () -> Unit,
 ) {
@@ -126,6 +129,15 @@ fun SettingsScreen(
                     subtitle = stringResource(if (cloudConfigured) R.string.settings_cloud_ai_on else R.string.settings_cloud_ai_off),
                     locked = false,
                     onClick = onCloudAiClick,
+                )
+            }
+            item {
+                SettingsRow(
+                    icon = Icons.Filled.Translate,
+                    title = stringResource(R.string.settings_gemini),
+                    subtitle = stringResource(if (geminiConfigured) R.string.settings_gemini_on else R.string.settings_gemini_off),
+                    locked = false,
+                    onClick = onGeminiClick,
                 )
             }
             item {

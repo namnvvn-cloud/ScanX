@@ -51,7 +51,9 @@ import com.scanx.app.data.DocumentMeta
 import com.scanx.app.ui.ScanCameraViewModel
 import com.scanx.app.ui.ScanViewModel
 import com.scanx.app.ui.screens.AdvancedSettingsScreen
+import com.scanx.app.convert.TranslationChoice
 import com.scanx.app.ui.screens.CloudSettingsDialog
+import com.scanx.app.ui.screens.GeminiSettingsDialog
 import com.scanx.app.ui.screens.TranslateDialog
 import com.scanx.app.ui.screens.DocumentDetailScreen
 import com.scanx.app.ui.screens.HomeScreen
@@ -110,6 +112,8 @@ class MainActivity : ComponentActivity() {
                     var convertUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
                     var showCloudSettings by remember { mutableStateOf(false) }
                     var cloudConfigured by remember { mutableStateOf(viewModel.isCloudConfigured) }
+                    var showGeminiSettings by remember { mutableStateOf(false) }
+                    var geminiConfigured by remember { mutableStateOf(viewModel.isGeminiConfigured) }
                     var convertWithCloud by remember { mutableStateOf(false) }
                     var translateUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
                     val translatePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -240,6 +244,8 @@ class MainActivity : ComponentActivity() {
                                 onAdvancedClick = { screen = Screen.AdvancedSettings },
                                 cloudConfigured = cloudConfigured,
                                 onCloudAiClick = { showCloudSettings = true },
+                                geminiConfigured = geminiConfigured,
+                                onGeminiClick = { showGeminiSettings = true },
                                 onRecommendApp = { shareApp() },
                                 onComingSoon = { showComingSoon() },
                             )
@@ -299,9 +305,11 @@ class MainActivity : ComponentActivity() {
                                         viewModel.exportDocument(document.id, format, mode, useCloud) { files -> deliver(files, format, share) }
                                     },
                                     cloudConfigured = cloudConfigured,
+                                    geminiConfigured = geminiConfigured,
                                     onOpenCloudSettings = { showCloudSettings = true },
-                                    onTranslate = { useClaude, cloudOcr, output, share ->
-                                        viewModel.translateDocument(document.id, useClaude, cloudOcr, output) { file -> deliver(listOf(file), output, share) }
+                                    onOpenGeminiSettings = { showGeminiSettings = true },
+                                    onTranslate = { engine, cloudOcr, output, share ->
+                                        viewModel.translateDocument(document.id, engine, cloudOcr, output) { file -> deliver(listOf(file), output, share) }
                                     },
                                     onDelete = {
                                         viewModel.moveToTrash(document.id)
@@ -344,13 +352,15 @@ class MainActivity : ComponentActivity() {
                     if (translateUris.isNotEmpty()) {
                         TranslateDialog(
                             cloudConfigured = cloudConfigured,
+                            geminiConfigured = geminiConfigured,
                             showShare = false,
                             onDismiss = { translateUris = emptyList() },
                             onOpenCloudSettings = { showCloudSettings = true },
-                            onConfirm = { useClaude, cloudOcr, output, _ ->
+                            onOpenGeminiSettings = { showGeminiSettings = true },
+                            onConfirm = { engine, cloudOcr, output, _ ->
                                 val uris = translateUris
                                 translateUris = emptyList()
-                                viewModel.translateFiles(uris, useClaude, cloudOcr, output) { file -> convertedFile = file to output }
+                                viewModel.translateFiles(uris, engine, cloudOcr, output) { file -> convertedFile = file to output }
                             },
                         )
                     }
@@ -364,6 +374,19 @@ class MainActivity : ComponentActivity() {
                                 viewModel.saveCloudSettings(key, model)
                                 cloudConfigured = key.isNotBlank()
                                 showCloudSettings = false
+                            },
+                        )
+                    }
+
+                    if (showGeminiSettings) {
+                        GeminiSettingsDialog(
+                            initialKey = viewModel.geminiApiKey(),
+                            initialModel = viewModel.geminiModel(),
+                            onDismiss = { showGeminiSettings = false },
+                            onSave = { key, model ->
+                                viewModel.saveGeminiSettings(key, model)
+                                geminiConfigured = key.isNotBlank()
+                                showGeminiSettings = false
                             },
                         )
                     }

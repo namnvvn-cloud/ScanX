@@ -44,6 +44,15 @@ class AppPreferences(context: Context) {
         get() = prefs.getString(KEY_CLOUD_MODEL, "claude-sonnet-5").orEmpty().ifBlank { "claude-sonnet-5" }
         set(value) = prefs.edit().putString(KEY_CLOUD_MODEL, value).apply()
 
+    /** API key Gemini của người dùng (miễn phí, aistudio.google.com/apikey) — chỉ dùng để dịch chữ. */
+    var geminiApiKey: String
+        get() = prefs.getString(KEY_GEMINI_KEY, "").orEmpty()
+        set(value) = prefs.edit().putString(KEY_GEMINI_KEY, value.trim()).apply()
+
+    var geminiModel: String
+        get() = prefs.getString(KEY_GEMINI_MODEL, "gemini-2.5-flash").orEmpty().ifBlank { "gemini-2.5-flash" }
+        set(value) = prefs.edit().putString(KEY_GEMINI_MODEL, value).apply()
+
     var sortOrder: SortOrder
         get() = runCatching {
             SortOrder.valueOf(prefs.getString(KEY_SORT, SortOrder.DATE_MODIFIED.name)!!)
@@ -65,6 +74,8 @@ class AppPreferences(context: Context) {
         private const val KEY_VIEW_MODE = "view_mode"
         private const val KEY_CLOUD_KEY = "cloud_api_key"
         private const val KEY_CLOUD_MODEL = "cloud_model"
+        private const val KEY_GEMINI_KEY = "gemini_api_key"
+        private const val KEY_GEMINI_MODEL = "gemini_model"
         const val DEFAULT_STABLE_FRAMES = 5
     }
 }

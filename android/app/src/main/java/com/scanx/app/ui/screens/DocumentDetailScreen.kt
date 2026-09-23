@@ -71,6 +71,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.scanx.app.R
 import com.scanx.app.convert.ExportFormat
+import com.scanx.app.convert.TranslationChoice
 import com.scanx.app.data.DocumentMeta
 import com.scanx.app.data.PdfExportMode
 import androidx.compose.material3.FilterChip
@@ -96,8 +97,10 @@ fun DocumentDetailScreen(
     onExport: (ExportFormat, PdfExportMode, useCloud: Boolean, share: Boolean) -> Unit,
     onDelete: () -> Unit,
     cloudConfigured: Boolean,
+    geminiConfigured: Boolean,
     onOpenCloudSettings: () -> Unit,
-    onTranslate: (useClaude: Boolean, cloudOcr: Boolean, output: ExportFormat, share: Boolean) -> Unit,
+    onOpenGeminiSettings: () -> Unit,
+    onTranslate: (engine: TranslationChoice, cloudOcr: Boolean, output: ExportFormat, share: Boolean) -> Unit,
 ) {
     var showTranslate by remember { mutableStateOf(false) }
     val docMode = PdfExportMode.fromCode(document.pdfMode)
@@ -161,10 +164,12 @@ fun DocumentDetailScreen(
     if (showTranslate) {
         TranslateDialog(
             cloudConfigured = cloudConfigured,
+            geminiConfigured = geminiConfigured,
             showShare = true,
             onDismiss = { showTranslate = false },
             onOpenCloudSettings = { showTranslate = false; onOpenCloudSettings() },
-            onConfirm = { useClaude, cloudOcr, output, share -> showTranslate = false; onTranslate(useClaude, cloudOcr, output, share) },
+            onOpenGeminiSettings = { showTranslate = false; onOpenGeminiSettings() },
+            onConfirm = { engine, cloudOcr, output, share -> showTranslate = false; onTranslate(engine, cloudOcr, output, share) },
         )
     }
 
