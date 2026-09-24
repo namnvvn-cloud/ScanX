@@ -17,20 +17,6 @@ import java.io.File
 import kotlin.math.abs
 
 /**
- * 4 góc tài liệu, thứ tự top-left / top-right / bottom-right / bottom-left, chuẩn hoá [0,1] theo
- * khung ảnh đã xoay đứng (upright). [frameWidth]/[frameHeight] là kích thước khung upright gốc để
- * overlay map đúng tỉ lệ ra PreviewView (FILL_CENTER). [confidence] = độ tin cậy thấp nhất trong
- * 4 góc (0..1) — thấp khi ảnh mờ/thiếu sáng nên dùng luôn làm cổng chất lượng trước khi tự chụp.
- */
-data class DetectedQuad(
-    val points: List<PointF>,
-    val confidence: Float,
-    val areaRatio: Float,
-    val frameWidth: Int,
-    val frameHeight: Int,
-)
-
-/**
  * Bộ phát hiện tài liệu bằng AI: model DocAligner (DocsaidLab, Apache-2.0) — backbone PP-LCNet
  * 1.0 + BiFPN, dự đoán 4 heatmap góc (input 256×256 BGR, output 4×128×128). Đạt JI 0.989 trên
  * SmartDoc 2015. Model đã được rút gọn đồ thị (thay Einsum của BiFPN bằng Mul/Add tương đương)
@@ -105,6 +91,48 @@ object AiDocumentDetector {
      * tiếp theo trong lúc trang vừa chụp còn đang được xử lý.
      */
     fun detectRefine(bgrUpright: Mat): DetectedQuad? = runDetect(netRefine, lockRefine, bgrUpright)
+
+    /** 4 heatmap góc (mỗi cái [width]×[height], thường 128×128) dạng mảng float — bản 0.9. */
+    class Heatmaps(val maps: List<FloatArray>, val width: Int, val height: Int)
+
+    /**
+     * Bản 0.9: chạy model cho luồng xem trước và trả về heatmap THÔ (không tự chọn góc) để
+     * [HeatmapPeaks] chọn đỉnh có xét khung đang theo dõi + [DocumentTracker] làm mượt/giữ khung.
+     * Dùng [Net]/khoá của luồng xem trước (như [detect]). Null nếu model chưa nạp/lỗi.
+     */
+    fun detectHeatmaps(bgrUpright: Mat): Heatmaps? {
+        val m = net ?: return null
+        val channels: List<Mat> = synchronized(lockMain) {
+            val blob = Dnn.blobFromImage(
+                bgrUpright, 1.0 / 255.0, Size(INPUT_SIZE, INPUT_SIZE), Scalar(0.0, 0.0, 0.0), false, false,
+            )
+            m.setInput(blob)
+            val out = m.forward()
+            blob.release()
+            val images = ArrayList<Mat>()
+            Dnn.imagesFromBlob(out, images)
+            out.release()
+            val list = ArrayList<Mat>()
+            Core.split(images[0], list)
+            images.forEach { it.release() }
+            list
+        }
+        try {
+            if (channels.size < 4) return null
+            val w = channels[0].cols()
+            val h = channels[0].rows()
+            val maps = channels.take(4).map { ch ->
+                val c = if (ch.isContinuous) ch else ch.clone()
+                val arr = FloatArray(w * h)
+                c.get(0, 0, arr)
+                if (c !== ch) c.release()
+                arr
+            }
+            return Heatmaps(maps, w, h)
+        } finally {
+            channels.forEach { it.release() }
+        }
+    }
 
     private fun runDetect(model: Net?, lock: Any, bgrUpright: Mat): DetectedQuad? {
         val m = model ?: return null
@@ -244,6 +272,33 @@ object AiDocumentDetector {
         return sig
     }
 
+    /**
+     * Bản 0.9: chữ ký CHỐNG RĂNG CƯA — làm phẳng vùng trang ra ảnh gấp 4 lần (192×256, nội suy tuyến
+     * tính) rồi mới thu về 48×64 bằng INTER_AREA (lấy trung bình). [pageSignature] warp thẳng về
+     * 48×64 (warpPerspective không hỗ trợ INTER_AREA → thực chất lấy mẫu điểm, bị răng cưa): lệch khung
+     * 1 px là chữ ký đổi hẳn. Đo trên cùng 1 trang dưới rung tay nhẹ: tương quan 2 khung liền nhau
+     * thấp nhất 0,33 → 0,74 (trang tổng hợp chữ dày), 0,53 → 0,70 (cảnh thật). Dùng cho đo độ nét và
+     * phát hiện nội dung đổi mạnh; KHÔNG thay [pageSignature] trong chống trùng trang (ngưỡng cũ đã
+     * đo trên chữ ký đó).
+     */
+    fun pageSignatureSharp(bgrUpright: Mat, quad: DetectedQuad): FloatArray {
+        val w = bgrUpright.cols().toDouble()
+        val h = bgrUpright.rows().toDouble()
+        val k = 4.0
+        val src = MatOfPoint2f(*quad.points.map { Point(it.x * w, it.y * h) }.toTypedArray())
+        val dst = MatOfPoint2f(
+            Point(0.0, 0.0), Point(SIG_W * k, 0.0), Point(SIG_W * k, SIG_H * k), Point(0.0, SIG_H * k),
+        )
+        val m = Imgproc.getPerspectiveTransform(src, dst)
+        val warped = Mat()
+        Imgproc.warpPerspective(bgrUpright, warped, m, Size(SIG_W * k, SIG_H * k), Imgproc.INTER_LINEAR)
+        val gray = Mat()
+        Imgproc.cvtColor(warped, gray, Imgproc.COLOR_BGR2GRAY)
+        val sig = signatureFromGray(gray)
+        src.release(); dst.release(); m.release(); warped.release(); gray.release()
+        return sig
+    }
+
     /** Chữ ký của 1 ảnh trang đã làm phẳng (xám, kích thước bất kỳ) — dùng kiểm tra trùng sau khi chụp. */
     fun signatureFromGray(gray: Mat): FloatArray {
         val small = Mat()
@@ -263,37 +318,13 @@ object AiDocumentDetector {
         return out
     }
 
-    /** Độ "có nội dung" của trang (độ lệch chuẩn chữ ký): ≈ 0 với giấy trắng, ≥ 0,03 khi có chữ. */
-    fun signatureTexture(sig: FloatArray): Float {
-        var mean = 0.0
-        for (v in sig) mean += v
-        mean /= sig.size
-        var s = 0.0
-        for (v in sig) s += (v - mean) * (v - mean)
-        return kotlin.math.sqrt(s / sig.size).toFloat()
-    }
+    /** Độ "có nội dung" của trang — xem [PageSignature.texture]. */
+    fun signatureTexture(sig: FloatArray): Float = PageSignature.texture(sig)
 
-    /**
-     * Độ giống nhau của 2 trang, -1..1. Trang trắng/ít nội dung được xử lý riêng: 2 trang cùng trắng
-     * → 1 (coi như giống, chỉ phân biệt được nhờ rút giấy ra/đổi vị trí); 1 trắng 1 có chữ → 0.
-     */
-    fun pageSimilarity(a: FloatArray, b: FloatArray): Float {
-        if (a.size != b.size) return 0f
-        val sa = signatureTexture(a)
-        val sb = signatureTexture(b)
-        if (sa < BLANK_TEXTURE && sb < BLANK_TEXTURE) return 1f
-        if (minOf(sa, sb) < BLANK_TEXTURE && maxOf(sa, sb) > BLANK_TEXTURE * 1.7f) return 0f
-        var ma = 0.0
-        var mb = 0.0
-        for (i in a.indices) { ma += a[i]; mb += b[i] }
-        ma /= a.size; mb /= b.size
-        var cov = 0.0
-        for (i in a.indices) cov += (a[i] - ma) * (b[i] - mb)
-        cov /= a.size
-        return (cov / (sa.toDouble() * sb + 1e-6)).toFloat()
-    }
+    /** Độ giống nhau của 2 trang, -1..1 — xem [PageSignature.similarity]. */
+    fun pageSimilarity(a: FloatArray, b: FloatArray): Float = PageSignature.similarity(a, b)
 
-    const val SIG_W = 48
-    const val SIG_H = 64
-    const val BLANK_TEXTURE = 0.012f
+    const val SIG_W = PageSignature.SIG_W
+    const val SIG_H = PageSignature.SIG_H
+    const val BLANK_TEXTURE = PageSignature.BLANK_TEXTURE
 }

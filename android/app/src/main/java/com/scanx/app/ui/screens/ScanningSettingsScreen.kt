@@ -4,6 +4,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.FilterChip
@@ -23,6 +25,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.scanx.app.R
 import com.scanx.app.data.CaptureMode
+import com.scanx.app.data.ScanEngine
 
 /**
  * Cài đặt quét: chọn chế độ chụp mặc định (Auto/Thủ công) và độ nhạy tự chụp — số khung hình cần
@@ -31,6 +34,8 @@ import com.scanx.app.data.CaptureMode
  */
 @Composable
 fun ScanningSettingsScreen(
+    scanEngine: ScanEngine,
+    onScanEngineChange: (ScanEngine) -> Unit,
     captureMode: CaptureMode,
     autoCaptureStableFrames: Int,
     flashDefault: Boolean,
@@ -49,7 +54,42 @@ fun ScanningSettingsScreen(
             )
         }
     ) { padding ->
-        Column(modifier = Modifier.padding(padding).padding(horizontal = 20.dp, vertical = 12.dp)) {
+        Column(
+            modifier = Modifier
+                .padding(padding)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+        ) {
+            // Bản 0.9: chọn bộ quét — Google ML Kit Document Scanner (mặc định) hoặc camera ScanX.
+            Text(stringResource(R.string.scanning_engine), style = MaterialTheme.typography.titleMedium)
+            Text(
+                stringResource(R.string.scanning_engine_desc),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            Row(modifier = Modifier.padding(top = 12.dp, bottom = 20.dp)) {
+                FilterChip(
+                    selected = scanEngine == ScanEngine.GOOGLE,
+                    onClick = { onScanEngineChange(ScanEngine.GOOGLE) },
+                    label = { Text(stringResource(R.string.scanning_engine_google)) },
+                    modifier = Modifier.padding(end = 8.dp),
+                )
+                FilterChip(
+                    selected = scanEngine == ScanEngine.SCANX,
+                    onClick = { onScanEngineChange(ScanEngine.SCANX) },
+                    label = { Text(stringResource(R.string.scanning_engine_scanx)) },
+                )
+            }
+
+            HorizontalDivider()
+
+            Text(
+                stringResource(R.string.scanning_scanx_only),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
+            )
             Text(stringResource(R.string.scanning_capture_mode), style = MaterialTheme.typography.titleMedium)
             Row(modifier = Modifier.padding(top = 12.dp, bottom = 20.dp)) {
                 FilterChip(

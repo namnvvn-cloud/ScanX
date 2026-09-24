@@ -91,18 +91,23 @@ fun PageEditScreen(
     pageLabel: String,
     onCancel: () -> Unit,
     onDone: (finalMaster: Bitmap, finalFilter: PageFilter?, masterChanged: Boolean) -> Unit,
+    /** Bản 0.9: mở sẵn 1 công cụ (bấm thẳng "Bộ lọc"/"Cắt xoay"/"Làm sạch" từ màn tài liệu). */
+    initialTool: PageEditTool? = null,
 ) {
     var master by remember { mutableStateOf(initialMaster) }
     var masterChanged by remember { mutableStateOf(false) }
     var filter by remember { mutableStateOf(initialFilter) }
-    var activeTool by remember { mutableStateOf<PageEditTool?>(null) }
+    var activeTool by remember { mutableStateOf(initialTool) }
     var showDiscardConfirm by remember { mutableStateOf(false) }
+    // Bộ lọc đang thử trong tab "Bộ lọc" (chưa Chấp nhận) — xem trước ngay trên khung chính (bản 0.9).
+    var previewFilter by remember { mutableStateOf<PageFilter?>(null) }
+    val shownFilter = if (activeTool == PageEditTool.FILTER) previewFilter ?: filter else filter
 
-    // Ảnh hiển thị ở khung xem chính (theo bộ lọc đang chọn, null = xem ảnh gốc chưa lọc).
+    // Ảnh hiển thị ở khung xem chính (theo bộ lọc đang chọn/đang thử, null = xem ảnh gốc chưa lọc).
     var displayBitmap by remember { mutableStateOf(master) }
-    LaunchedEffect(master, filter) {
+    LaunchedEffect(master, shownFilter) {
         displayBitmap = withContext(Dispatchers.Default) {
-            val f = filter
+            val f = shownFilter
             if (f != null) runCatching { ScanFilters.renderPageFilter(master, f, 1400) }.getOrDefault(master) else master
         }
     }
@@ -113,16 +118,42 @@ fun PageEditScreen(
         if (hasChanges()) showDiscardConfirm = true else onCancel()
     }
 
-    // Giải phóng bitmap trung gian màn hình này tự tạo ra (không phải initialMaster) khi rời màn.
+    // Mở thẳng 1 công cụ từ màn tài liệu (bản 0.9): Chấp nhận = lưu luôn và quay về tài liệu; Huỷ =
+    // quay về tài liệu — đúng 1 bước như Scanner Pro, không phải bấm thêm "Xong".
+    val direct = initialTool != null
+    val handedOff = remember { booleanArrayOf(false) }
+
+    fun finish(finalMaster: Bitmap, finalFilter: PageFilter?, changed: Boolean) {
+        handedOff[0] = true
+        onDone(finalMaster, finalFilter, changed)
+    }
+
+    fun closeTool() {
+        previewFilter = null
+        if (direct && !hasChanges()) onCancel() else activeTool = null
+    }
+
+    fun acceptNewMaster(newBitmap: Bitmap) {
+        val old = master
+        master = newBitmap
+        masterChanged = true
+        activeTool = null
+        if (old !== initialMaster && !old.isRecycled) old.recycle()
+        if (direct) finish(newBitmap, filter, true)
+    }
+
+    // Giải phóng bitmap trung gian màn hình này tự tạo ra (không phải initialMaster) khi rời màn — TRỪ
+    // khi đã giao nó cho người gọi qua "Xong" (bản 0.9 sửa lỗi 0.8: ảnh đã giao bị recycle ngay lúc đóng
+    // màn trong khi ViewModel còn đang nén/ghi nó ở luồng nền → lỗi "recycled bitmap").
     DisposableEffect(Unit) {
         onDispose {
-            if (masterChanged && master !== initialMaster && !master.isRecycled) master.recycle()
+            if (!handedOff[0] && masterChanged && master !== initialMaster && !master.isRecycled) master.recycle()
         }
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Thanh trên: đóng + tên trang + Xong.
+            // Thanh trên: đóng + tên trang + Xong (Xong chỉ hiện khi không có công cụ nào đang mở dở).
             Row(
                 modifier = Modifier.fillMaxWidth().padding(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -132,57 +163,60 @@ fun PageEditScreen(
                     Icon(Icons.Filled.Close, contentDescription = "Đóng", tint = Color.White)
                 }
                 Text(pageLabel, color = Color.White, style = MaterialTheme.typography.titleMedium)
-                TextButton(onClick = { onDone(master, filter, masterChanged) }) {
-                    Text("Xong", color = Color(0xFF34D058), style = MaterialTheme.typography.titleMedium)
+                if (activeTool == null) {
+                    TextButton(onClick = { finish(master, filter, masterChanged) }) {
+                        Text("Xong", color = Color(0xFF34D058), style = MaterialTheme.typography.titleMedium)
+                    }
+                } else {
+                    Spacer(modifier = Modifier.width(64.dp))
                 }
             }
 
-            // Khung xem chính.
-            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                val bmp = displayBitmap
-                Image(
-                    bitmap = bmp.asImageBitmap(),
-                    contentDescription = pageLabel,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(12.dp)
-                        .aspectRatio(bmp.width.toFloat() / bmp.height.toFloat()),
+            when (activeTool) {
+                null, PageEditTool.FILTER -> {
+                    // Khung xem chính — ảnh vừa khít phần còn trống (không đẩy thanh công cụ ra khỏi màn hình).
+                    Box(
+                        modifier = Modifier.weight(1f).fillMaxWidth().padding(12.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        val bmp = displayBitmap
+                        Image(
+                            bitmap = bmp.asImageBitmap(),
+                            contentDescription = pageLabel,
+                            modifier = Modifier.aspectRatio(bmp.width.toFloat() / bmp.height.toFloat()),
+                        )
+                    }
+                    Surface(color = Color(0xFF1C1C1E)) {
+                        if (activeTool == null) {
+                            PageEditToolBar(onSelect = { activeTool = it })
+                        } else {
+                            FilterToolPanel(
+                                master = master,
+                                current = filter,
+                                onPreview = { previewFilter = it },
+                                onCancel = { closeTool() },
+                                onAccept = { chosen ->
+                                    filter = chosen
+                                    previewFilter = null
+                                    activeTool = null
+                                    if (direct) finish(master, chosen, masterChanged)
+                                },
+                            )
+                        }
+                    }
+                }
+                PageEditTool.CROP_ROTATE -> CropRotateToolPanel(
+                    master = master,
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    onCancel = { closeTool() },
+                    onAccept = { acceptNewMaster(it) },
                 )
-            }
-
-            // Thanh dưới: 3 công cụ, hoặc bảng điều khiển của công cụ đang mở.
-            Surface(color = Color(0xFF1C1C1E)) {
-                when (activeTool) {
-                    null -> PageEditToolBar(onSelect = { activeTool = it })
-                    PageEditTool.FILTER -> FilterToolPanel(
-                        master = master,
-                        current = filter,
-                        onCancel = { activeTool = null },
-                        onAccept = { chosen -> filter = chosen; activeTool = null },
-                    )
-                    PageEditTool.CROP_ROTATE -> CropRotateToolPanel(
-                        master = master,
-                        onCancel = { activeTool = null },
-                        onAccept = { newBitmap ->
-                            val old = master
-                            master = newBitmap
-                            masterChanged = true
-                            activeTool = null
-                            if (old !== initialMaster && !old.isRecycled) old.recycle()
-                        },
-                    )
-                    PageEditTool.CLEANUP -> CleanupToolPanel(
-                        master = master,
-                        onCancel = { activeTool = null },
-                        onAccept = { newBitmap ->
-                            val old = master
-                            master = newBitmap
-                            masterChanged = true
-                            activeTool = null
-                            if (old !== initialMaster && !old.isRecycled) old.recycle()
-                        },
-                    )
-                }
+                PageEditTool.CLEANUP -> CleanupToolPanel(
+                    master = master,
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    onCancel = { closeTool() },
+                    onAccept = { acceptNewMaster(it) },
+                )
             }
         }
     }
@@ -202,7 +236,8 @@ fun PageEditScreen(
     }
 }
 
-private enum class PageEditTool { FILTER, CROP_ROTATE, CLEANUP }
+/** 3 công cụ của màn "Chỉnh sửa trang" — public (bản 0.9) để màn tài liệu mở thẳng 1 công cụ. */
+enum class PageEditTool { FILTER, CROP_ROTATE, CLEANUP }
 
 @Composable
 private fun PageEditToolBar(onSelect: (PageEditTool) -> Unit) {
@@ -211,7 +246,7 @@ private fun PageEditToolBar(onSelect: (PageEditTool) -> Unit) {
         horizontalArrangement = Arrangement.SpaceEvenly,
     ) {
         ToolBarButton("Bộ lọc", Icons.Filled.Tune) { onSelect(PageEditTool.FILTER) }
-        ToolBarButton("Cắt và xoay", Icons.Filled.Crop) { onSelect(PageEditTool.CROP_ROTATE) }
+        ToolBarButton("Cắt xoay", Icons.Filled.Crop) { onSelect(PageEditTool.CROP_ROTATE) }
         ToolBarButton("Làm sạch", Icons.Filled.AutoFixHigh) { onSelect(PageEditTool.CLEANUP) }
     }
 }
@@ -242,11 +277,14 @@ private fun AcceptCancelRow(onCancel: () -> Unit, onAccept: () -> Unit, acceptEn
 private fun FilterToolPanel(
     master: Bitmap,
     current: PageFilter?,
+    onPreview: (PageFilter) -> Unit,
     onCancel: () -> Unit,
     onAccept: (PageFilter) -> Unit,
 ) {
     var selected by remember { mutableStateOf(current ?: PageFilter.AUTO) }
     var thumbnails by remember { mutableStateOf<Map<PageFilter, Bitmap>?>(null) }
+    // Xem trước bộ lọc đang chọn ngay trên khung chính (bản 0.9).
+    LaunchedEffect(selected) { onPreview(selected) }
 
     LaunchedEffect(master) {
         thumbnails = withContext(Dispatchers.Default) {
@@ -310,6 +348,7 @@ private enum class CropStage { ROTATE, CROP }
 @Composable
 private fun CropRotateToolPanel(
     master: Bitmap,
+    modifier: Modifier = Modifier,
     onCancel: () -> Unit,
     onAccept: (Bitmap) -> Unit,
 ) {
@@ -342,18 +381,27 @@ private fun CropRotateToolPanel(
         }
     }
 
-    Column(modifier = Modifier.padding(vertical = 12.dp)) {
+    // Bản 0.9: ảnh chiếm phần trống phía trên (weight 1f, vừa khít theo tỉ lệ), nút điều khiển cố định
+    // phía dưới — bản 0.8 đặt ảnh rộng hết màn trong thanh dưới nên trang A4 đẩy nút Chấp nhận ra ngoài.
+    Column(modifier = modifier) {
+        Box(
+            modifier = Modifier.weight(1f).fillMaxWidth().padding(16.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            when {
+                stage == CropStage.ROTATE -> Image(
+                    bitmap = working.asImageBitmap(),
+                    contentDescription = "Xoay trang",
+                    modifier = Modifier.aspectRatio(working.width.toFloat() / working.height.toFloat()),
+                )
+                isBusy -> CircularProgressIndicator(color = Color.White)
+                else -> QuadCropCanvas(bitmap = working, quad = quad, onQuadChange = { quad = it })
+            }
+        }
+        Surface(color = Color(0xFF1C1C1E)) {
+        Column(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
         when (stage) {
             CropStage.ROTATE -> {
-                Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp), contentAlignment = Alignment.Center) {
-                    Image(
-                        bitmap = working.asImageBitmap(),
-                        contentDescription = "Xoay trang",
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(working.width.toFloat() / working.height.toFloat()),
-                    )
-                }
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -389,15 +437,6 @@ private fun CropRotateToolPanel(
             }
 
             CropStage.CROP -> {
-                Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp), contentAlignment = Alignment.Center) {
-                    if (isBusy) {
-                        Box(modifier = Modifier.fillMaxWidth().aspectRatio(0.75f), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(color = Color.White)
-                        }
-                    } else {
-                        QuadCropCanvas(bitmap = working, quad = quad, onQuadChange = { quad = it })
-                    }
-                }
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.Center,
@@ -432,6 +471,8 @@ private fun CropRotateToolPanel(
                 }
             }
         }
+        }
+        }
     }
 }
 
@@ -450,7 +491,6 @@ private fun QuadCropCanvas(bitmap: Bitmap, quad: List<PointF>, onQuadChange: (Li
 
     Box(
         modifier = Modifier
-            .fillMaxWidth()
             .aspectRatio(bitmap.width.toFloat() / bitmap.height.toFloat())
             .onSizeChanged { boxSize = it },
     ) {
@@ -512,6 +552,7 @@ private fun QuadCropCanvas(bitmap: Bitmap, quad: List<PointF>, onQuadChange: (Li
 @Composable
 private fun CleanupToolPanel(
     master: Bitmap,
+    modifier: Modifier = Modifier,
     onCancel: () -> Unit,
     onAccept: (Bitmap) -> Unit,
 ) {
@@ -547,11 +588,14 @@ private fun CleanupToolPanel(
         }
     }
 
-    Column(modifier = Modifier.padding(vertical = 12.dp)) {
+    // Bản 0.9: ảnh chiếm phần trống phía trên, vừa khít theo tỉ lệ; nút điều khiển cố định phía dưới.
+    Column(modifier = modifier) {
+        Box(
+            modifier = Modifier.weight(1f).fillMaxWidth().padding(16.dp),
+            contentAlignment = Alignment.Center,
+        ) {
         Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp)
                 .aspectRatio(previewBase.width.toFloat() / previewBase.height.toFloat())
                 .onSizeChanged { boxSize = it }
                 .pointerInput(Unit) {
@@ -597,7 +641,10 @@ private fun CleanupToolPanel(
                 }
             }
         }
+        }
 
+        Surface(color = Color(0xFF1C1C1E)) {
+        Column(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -644,6 +691,8 @@ private fun CleanupToolPanel(
                 }
             },
         )
+        }
+        }
     }
 }
 
@@ -660,6 +709,7 @@ fun PageEditOverlayForDocument(
     documentId: String,
     pageIndex: Int,
     onClose: () -> Unit,
+    initialTool: PageEditTool? = null,
 ) {
     var master by remember(documentId, pageIndex) { mutableStateOf<Bitmap?>(null) }
     var filter by remember(documentId, pageIndex) { mutableStateOf<PageFilter?>(null) }
@@ -679,6 +729,7 @@ fun PageEditOverlayForDocument(
             initialMaster = m,
             initialFilter = filter,
             pageLabel = "Trang ${pageIndex + 1}",
+            initialTool = initialTool,
             onCancel = { if (!m.isRecycled) m.recycle(); onClose() },
             onDone = { finalMaster, finalFilter, masterChanged ->
                 viewModel.commitPageEdit(documentId, pageIndex, if (masterChanged) finalMaster else null, finalFilter)

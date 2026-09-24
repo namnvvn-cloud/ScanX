@@ -8,6 +8,13 @@ import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import androidx.activity.result.contract.ActivityResultContract
+import androidx.activity.result.IntentSenderRequest
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanner
+import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
+import com.scanx.app.data.ScanEngine
+import com.scanx.app.ui.screens.PageEditTool
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Row
@@ -120,9 +127,11 @@ class MainActivity : ComponentActivity() {
                     val translatePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
                         if (!uris.isNullOrEmpty()) translateUris = uris
                     }
-                    // Bản 0.8: đang mở màn "Chỉnh sửa trang" cho trang nào của tài liệu đã lưu (Screen.Detail).
+                    // Bản 0.8: đang mở màn "Chỉnh sửa trang" cho trang nào của tài liệu đã lưu (Screen.Detail);
+                    // bản 0.9: kèm công cụ mở sẵn (null = thanh 3 công cụ).
                     var editingDetailPage by remember { mutableStateOf<Int?>(null) }
-                    LaunchedEffect(screen) { editingDetailPage = null }
+                    var editingDetailTool by remember { mutableStateOf<PageEditTool?>(null) }
+                    LaunchedEffect(screen) { editingDetailPage = null; editingDetailTool = null }
                     val prefs = remember { com.scanx.app.data.AppPreferences(context) }
 
                     LaunchedEffect(errorMessage) {
@@ -190,6 +199,46 @@ class MainActivity : ComponentActivity() {
                         if (granted) screen = Screen.Camera else cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
                     }
 
+                    // Bản 0.9: bộ quét Google (ML Kit Document Scanner, chế độ FULL — Bộ lọc/Cắt xoay/Làm
+                    // sạch/xoá bóng có sẵn). Kết quả → lưu thành tài liệu ScanX → mở thẳng màn tài liệu.
+                    val googleScanLauncher = rememberLauncherForActivityResult(
+                        ActivityResultContracts.StartIntentSenderForResult()
+                    ) { result ->
+                        if (result.resultCode == Activity.RESULT_OK) {
+                            val scan = GmsDocumentScanningResult.fromActivityResultIntent(result.data)
+                            val uris = scan?.pages?.mapNotNull { it.imageUri }.orEmpty()
+                            if (uris.isNotEmpty()) {
+                                viewModel.saveGoogleScan(uris) { id -> if (screen is Screen.Home) screen = Screen.Detail(id) }
+                            }
+                        }
+                    }
+
+                    fun startScan() {
+                        if (prefs.scanEngine == ScanEngine.SCANX) {
+                            requestCameraThenOpen()
+                            return
+                        }
+                        val options = GmsDocumentScannerOptions.Builder()
+                            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
+                            .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
+                            .setGalleryImportAllowed(true)
+                            .build()
+                        val scanner: GmsDocumentScanner = GmsDocumentScanning.getClient(options)
+                        scanner.getStartScanIntent(this@MainActivity)
+                            .addOnSuccessListener { sender ->
+                                googleScanLauncher.launch(IntentSenderRequest.Builder(sender).build())
+                            }
+                            .addOnFailureListener { e ->
+                                // Máy không có Google Play services / RAM < 1,7 GB / chưa tải được module → camera ScanX.
+                                Toast.makeText(
+                                    context,
+                                    getString(R.string.scan_google_unavailable, e.message ?: ""),
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                                requestCameraThenOpen()
+                            }
+                    }
+
                     when (val current = screen) {
                         is Screen.Home -> {
                             HomeScreen(
@@ -217,7 +266,7 @@ class MainActivity : ComponentActivity() {
                                 onSettingsClick = { screen = Screen.Settings },
                                 onTrashClick = { screen = Screen.Trash },
                                 onImportFilesClick = { importLauncher.launch("image/*") },
-                                onCameraClick = { requestCameraThenOpen() },
+                                onCameraClick = { startScan() },
                                 onComingSoon = { showComingSoon() },
                                 onConvertFiles = { convertPicker.launch(arrayOf("application/pdf", "image/*")) },
                                 onTranslateFiles = { translatePicker.launch(arrayOf("application/pdf", "image/*")) },
@@ -232,7 +281,8 @@ class MainActivity : ComponentActivity() {
                                 onDone = {
                                     val pages = cameraViewModel.takeSessionPages()
                                     if (pages.isNotEmpty()) {
-                                        viewModel.saveScannedPages(pages)
+                                        // Bản 0.9: lưu xong mở thẳng màn tài liệu (thanh Bộ lọc/Cắt xoay/Làm sạch).
+                                        viewModel.saveScannedPages(pages) { id -> if (screen is Screen.Home) screen = Screen.Detail(id) }
                                     }
                                     screen = Screen.Home
                                 },
@@ -256,10 +306,13 @@ class MainActivity : ComponentActivity() {
                         }
 
                         is Screen.ScanningSettings -> {
+                            var scanEngine by remember { mutableStateOf(prefs.scanEngine) }
                             var captureMode by remember { mutableStateOf(prefs.captureMode) }
                             var stableFrames by remember { mutableStateOf(prefs.autoCaptureStableFrames) }
                             var flashDefault by remember { mutableStateOf(prefs.flashEnabled) }
                             ScanningSettingsScreen(
+                                scanEngine = scanEngine,
+                                onScanEngineChange = { e -> scanEngine = e; prefs.scanEngine = e },
                                 captureMode = captureMode,
                                 autoCaptureStableFrames = stableFrames,
                                 flashDefault = flashDefault,
@@ -298,6 +351,7 @@ class MainActivity : ComponentActivity() {
                         is Screen.Detail -> {
                             val document = documents.find { it.id == current.documentId }
                                 ?: trashedDocuments.find { it.id == current.documentId }
+                                ?: viewModel.documentById(current.documentId)
                             if (document == null) {
                                 LaunchedEffect(current.documentId) { screen = Screen.Home }
                             } else {
@@ -319,7 +373,7 @@ class MainActivity : ComponentActivity() {
                                         viewModel.moveToTrash(document.id)
                                         screen = Screen.Home
                                     },
-                                    onEditPage = { pageIndex -> editingDetailPage = pageIndex },
+                                    onEditPage = { pageIndex, tool -> editingDetailTool = tool; editingDetailPage = pageIndex },
                                 )
                             }
                         }
@@ -333,7 +387,8 @@ class MainActivity : ComponentActivity() {
                             viewModel = viewModel,
                             documentId = editingDoc,
                             pageIndex = editingPage,
-                            onClose = { editingDetailPage = null },
+                            initialTool = editingDetailTool,
+                            onClose = { editingDetailPage = null; editingDetailTool = null },
                         )
                     }
 

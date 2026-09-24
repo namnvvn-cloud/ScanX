@@ -114,12 +114,15 @@ class DocumentRepository(private val context: Context) {
         return meta
     }
 
-    /** Dựng PDF của tài liệu [id] ở chế độ [mode] ra [outFile] (dùng khi xuất file); vẫn áp bộ lọc
-     *  riêng từng trang (nếu có, bản 0.8) đè lên [mode] cho đúng trang đã chỉnh trong app. */
+    /** Dựng PDF của tài liệu [id] ở chế độ [mode] ra [outFile] (dùng khi xuất file). Bộ lọc riêng từng
+     *  trang (bản 0.8) chỉ áp khi xuất đúng chế độ đang lưu của tài liệu; người dùng chủ động chọn chế
+     *  độ KHÁC lúc xuất (vd. A1 nhỏ gọn) thì tôn trọng chế độ đó cho mọi trang (bản 0.9). */
     fun buildPdf(id: String, mode: PdfExportMode, outFile: File, title: String): Boolean {
         val pages = getPageFiles(id)
         if (pages.isEmpty()) return false
-        val pageFilters = getDocument(id)?.pageFilters?.map { PageFilter.fromCode(it) } ?: emptyList()
+        val meta = getDocument(id)
+        val sameAsDocument = meta != null && PdfExportMode.fromCode(meta.pdfMode) == mode
+        val pageFilters = if (sameAsDocument) meta!!.pageFilters.map { PageFilter.fromCode(it) } else emptyList()
         PdfBuilder.buildPdf(pages, outFile, mode, title, getTextLayers(id), pageFilters)
         return true
     }

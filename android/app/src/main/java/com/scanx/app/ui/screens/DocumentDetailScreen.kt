@@ -20,6 +20,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.filled.AutoFixHigh
+import androidx.compose.material.icons.filled.Crop
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -102,14 +110,28 @@ fun DocumentDetailScreen(
     onOpenCloudSettings: () -> Unit,
     onOpenGeminiSettings: () -> Unit,
     onTranslate: (engine: TranslationChoice, cloudOcr: Boolean, bilingual: Boolean, output: ExportFormat, share: Boolean) -> Unit,
-    /** Mở màn "Chỉnh sửa trang" (bản 0.8: Bộ lọc/Cắt xoay/Làm sạch) cho trang [pageIndex]. */
-    onEditPage: (pageIndex: Int) -> Unit = {},
+    /** Mở màn "Chỉnh sửa trang" (Bộ lọc/Cắt xoay/Làm sạch) cho trang [pageIndex]; [tool] = công cụ mở
+     *  sẵn (bản 0.9, bấm từ thanh dưới), null = mở màn với thanh 3 công cụ. */
+    onEditPage: (pageIndex: Int, tool: PageEditTool?) -> Unit = { _, _ -> },
 ) {
     var showTranslate by remember { mutableStateOf(false) }
     val docMode = PdfExportMode.fromCode(document.pdfMode)
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showExportSheet by remember { mutableStateOf(false) }
     var tab by remember { mutableIntStateOf(0) }
+    // Bản 0.9: dựng lại ảnh trang mỗi khi tài liệu được sửa (cùng đường dẫn document.pdf nhưng nội dung mới).
+    val version = document.modifiedAtEpochMillis
+    val pageCount by produceState(initialValue = -1, pdfFile, version) { value = pdfPageCount(pdfFile) }
+    val listState = rememberLazyListState()
+    // Trang đang xem = trang chiếm nhiều diện tích nhất trên màn (không phải trang đầu vừa lướt qua mép).
+    val currentPage by remember {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            info.visibleItemsInfo.maxByOrNull {
+                minOf(it.offset + it.size, info.viewportEndOffset) - maxOf(it.offset, info.viewportStartOffset)
+            }?.index ?: listState.firstVisibleItemIndex
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -133,7 +155,43 @@ fun DocumentDetailScreen(
                     }
                 }
             )
-        }
+        },
+        // Bản 0.9: thanh công cụ chỉnh sửa luôn hiện dưới màn tài liệu (như Scanner Pro) — áp cho trang
+        // đang xem; bản 0.8 chỉ có icon bút chì nhỏ trên từng trang nên người dùng không tìm thấy.
+        bottomBar = {
+            if (tab == 0 && pageCount > 0) {
+                val page = currentPage.coerceIn(0, pageCount - 1)
+                Column {
+                    Text(
+                        stringResource(R.string.detail_page_of, page + 1, pageCount),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(top = 6.dp),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+                    NavigationBar {
+                        NavigationBarItem(
+                            selected = false,
+                            onClick = { onEditPage(page, PageEditTool.FILTER) },
+                            icon = { Icon(Icons.Filled.Tune, contentDescription = null) },
+                            label = { Text(stringResource(R.string.detail_tool_filter)) },
+                        )
+                        NavigationBarItem(
+                            selected = false,
+                            onClick = { onEditPage(page, PageEditTool.CROP_ROTATE) },
+                            icon = { Icon(Icons.Filled.Crop, contentDescription = null) },
+                            label = { Text(stringResource(R.string.detail_tool_crop)) },
+                        )
+                        NavigationBarItem(
+                            selected = false,
+                            onClick = { onEditPage(page, PageEditTool.CLEANUP) },
+                            icon = { Icon(Icons.Filled.AutoFixHigh, contentDescription = null) },
+                            label = { Text(stringResource(R.string.detail_tool_clean)) },
+                        )
+                    }
+                }
+            }
+        },
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             TabRow(selectedTabIndex = tab) {
@@ -141,7 +199,14 @@ fun DocumentDetailScreen(
                 Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text(stringResource(R.string.detail_tab_text)) })
             }
             if (tab == 0) {
-                PdfPagesView(pdfFile, Modifier.fillMaxSize(), onEditPage = onEditPage)
+                PdfPagesView(
+                    file = pdfFile,
+                    pageCount = pageCount,
+                    version = version,
+                    listState = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    onEditPage = { index -> onEditPage(index, null) },
+                )
             } else {
                 SelectionContainer {
                     Text(
@@ -221,25 +286,33 @@ private suspend fun renderPdfPage(file: File, index: Int, targetWidth: Int): Bit
 }
 
 @Composable
-private fun PdfPagesView(file: File, modifier: Modifier, onEditPage: (Int) -> Unit = {}) {
-    val pageCount by produceState(initialValue = -1, file) { value = pdfPageCount(file) }
+private fun PdfPagesView(
+    file: File,
+    pageCount: Int,
+    version: Long,
+    listState: LazyListState,
+    modifier: Modifier,
+    onEditPage: (Int) -> Unit = {},
+) {
     when {
         pageCount < 0 -> Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         pageCount == 0 -> Box(modifier, contentAlignment = Alignment.Center) { Text(stringResource(R.string.detail_pdf_error)) }
         else -> LazyColumn(
+            state = listState,
             modifier = modifier.background(Color(0xFFE9ECEF)),
             contentPadding = PaddingValues(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            items(pageCount) { index -> PdfPage(file, index, onEdit = { onEditPage(index) }) }
+            items(pageCount) { index -> PdfPage(file, index, version, onEdit = { onEditPage(index) }) }
         }
     }
 }
 
 @Composable
-private fun PdfPage(file: File, index: Int, onEdit: () -> Unit = {}) {
-    val bitmap by produceState<Bitmap?>(initialValue = null, file, index) { value = renderPdfPage(file, index, 1240) }
-    Surface(shadowElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
+private fun PdfPage(file: File, index: Int, version: Long, onEdit: () -> Unit = {}) {
+    val bitmap by produceState<Bitmap?>(initialValue = null, file, index, version) { value = renderPdfPage(file, index, 1240) }
+    // Bản 0.9: chạm vào trang cũng mở màn chỉnh sửa (ngoài icon bút chì).
+    Surface(shadowElevation = 2.dp, modifier = Modifier.fillMaxWidth().clickable(onClick = onEdit)) {
         Box {
             val bmp = bitmap
             if (bmp != null) {

@@ -231,6 +231,10 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         _folders.value = repository.listFolders()
     }
 
+    /** Tra tài liệu theo id trên danh sách vừa [refresh] (không qua bộ lọc thư mục/tìm kiếm) — bản 0.9,
+     *  dùng khi vừa lưu xong và mở thẳng màn tài liệu trước khi danh sách hiển thị kịp cập nhật. */
+    fun documentById(id: String): DocumentMeta? = _allDocuments.value.find { it.id == id }
+
     fun refreshTrash() {
         _trashedDocuments.value = repository.listDocuments(includeTrashed = true).filter { it.isTrashed }
     }
@@ -280,7 +284,9 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** Lưu các trang vừa chụp (ảnh master đã làm phẳng trên đĩa) thành 1 tài liệu mới, PDF mặc định Đen trắng – Chất lượng cao. */
-    fun saveScannedPages(pages: List<CapturedPage>) {
+    /** [onSaved] (bản 0.9) nhận id tài liệu vừa lưu — MainActivity mở thẳng màn tài liệu để người dùng
+     *  chỉnh Bộ lọc/Cắt xoay/Làm sạch ngay, giống luồng Scanner Pro. */
+    fun saveScannedPages(pages: List<CapturedPage>, onSaved: (String) -> Unit = {}) {
         if (pages.isEmpty()) return
         viewModelScope.launch {
             _isProcessing.value = true
@@ -294,7 +300,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                 } else {
                     OcrResult("", emptyList())
                 }
-                withContext(Dispatchers.IO) {
+                val meta = withContext(Dispatchers.IO) {
                     repository.saveDocument(
                         masters = masters, ocrText = ocr.text, folderId = _currentFolderId.value,
                         textLayers = ocr.layers, pageFilters = pages.map { it.pageFilter },
@@ -302,6 +308,60 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 pages.forEach { if (!it.preview.isRecycled) it.preview.recycle() }
                 refresh()
+                onSaved(meta.id)
+            } catch (e: Exception) {
+                _errorMessage.value = "Không lưu được tài liệu: ${e.message}"
+            } finally {
+                _isProcessing.value = false
+            }
+        }
+    }
+
+    /**
+     * Bản 0.9: lưu kết quả bộ quét Google (ML Kit Document Scanner) thành 1 tài liệu ScanX. Ảnh trả về
+     * đã được Google cắt/làm phẳng/xoay đúng chiều và áp bộ lọc người dùng chọn → giữ NGUYÊN như người
+     * dùng vừa thấy: lưu chế độ Màu–Chất lượng cao + đánh dấu từng trang "Ban đầu" (không lọc thêm).
+     * Xuất file ở chế độ khác (A1/A2/B1) thì vẫn áp đúng chế độ đó ([DocumentRepository.buildPdf]).
+     * OCR lớp chữ ẩn chạy như tài liệu chụp bằng camera ScanX (nếu bật trong Cài đặt).
+     * Ảnh phải được đọc ngay (quyền đọc URI Google cấp chỉ tạm thời).
+     */
+    fun saveGoogleScan(uris: List<Uri>, onSaved: (String) -> Unit = {}) {
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            _isProcessing.value = true
+            try {
+                val context = getApplication<Application>()
+                val dir = File(context.cacheDir, "gms_scan_session").apply { mkdirs() }
+                val stamp = System.currentTimeMillis()
+                val masters = withContext(Dispatchers.IO) {
+                    uris.mapIndexedNotNull { i, uri ->
+                        runCatching {
+                            val f = File(dir, "gms_${stamp}_$i.jpg")
+                            val copied = context.contentResolver.openInputStream(uri)?.use { input ->
+                                f.outputStream().use { out -> input.copyTo(out) }
+                            }
+                            if (copied != null && f.length() > 0L) f else null
+                        }.getOrNull()
+                    }
+                }
+                if (masters.isEmpty()) {
+                    _errorMessage.value = "Không đọc được ảnh từ bộ quét Google"
+                    return@launch
+                }
+                val ocr = if (prefs.autoOcrEnabled) {
+                    withContext(Dispatchers.Default) { recognizeMasters(masters) }
+                } else {
+                    OcrResult("", emptyList())
+                }
+                val meta = withContext(Dispatchers.IO) {
+                    repository.saveDocument(
+                        masters = masters, ocrText = ocr.text, folderId = _currentFolderId.value,
+                        textLayers = ocr.layers, pdfMode = PdfExportMode.COLOR_HQ,
+                        pageFilters = masters.map { PageFilter.ORIGINAL },
+                    )
+                }
+                refresh()
+                onSaved(meta.id)
             } catch (e: Exception) {
                 _errorMessage.value = "Không lưu được tài liệu: ${e.message}"
             } finally {

@@ -83,8 +83,10 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 /**
- * Màn hình camera tự viết (CameraX + OpenCV), thay cho UI camera có sẵn của Google ML Kit Document
- * Scanner: tự phát hiện khung tài liệu real-time, tự động chụp khi ổn định (chế độ Auto) hoặc
+ * Màn hình camera tự viết (CameraX + OpenCV). Bản 0.9: là bộ quét DỰ PHÒNG/tuỳ chọn — mặc định app mở
+ * bộ quét Google ML Kit Document Scanner (MainActivity.startScan); màn này dùng khi người dùng chọn
+ * "Camera ScanX" trong Cài đặt quét hoặc máy không hỗ trợ bộ quét Google. Tự phát hiện khung tài liệu
+ * real-time, tự động chụp khi ổn định (chế độ Auto) hoặc
  * chụp thủ công, hiển thị khung xanh theo dõi biên tài liệu, chụp trang tiếp theo ngay khi người
  * dùng lật sang trang mới mà không cần bấm gì thêm.
  */
@@ -120,7 +122,10 @@ fun ScanCameraScreen(
     val previewView = remember {
         PreviewView(context).apply {
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-            scaleType = PreviewView.ScaleType.FILL_CENTER
+            // Bản 0.9: FIT_CENTER — hiển thị TRỌN khung 4:3 mà AI đang nhìn (có dải đen trên/dưới như
+            // Scanner Pro). FILL_CENTER cũ phóng to rồi cắt ~40% bề ngang trên máy 20:9 → người dùng không
+            // thấy mép giấy/góc giấy AI đang thấy, căn khung rất khó ("không bắt được khung hình").
+            scaleType = PreviewView.ScaleType.FIT_CENTER
         }
     }
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
@@ -236,7 +241,7 @@ fun ScanCameraScreen(
         if (vw <= 0f || vh <= 0f) return@LaunchedEffect
         val fw = q.frameWidth.toFloat().coerceAtLeast(1f)
         val fh = q.frameHeight.toFloat().coerceAtLeast(1f)
-        val scale = maxOf(vw / fw, vh / fh)
+        val scale = minOf(vw / fw, vh / fh)
         val x = req.point.x * fw * scale + (vw - fw * scale) / 2f
         val y = req.point.y * fh * scale + (vh - fh * scale) / 2f
         runCatching {
@@ -251,9 +256,8 @@ fun ScanCameraScreen(
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
 
-        // Khung theo dõi biên tài liệu real-time. Map toạ độ đúng cách PreviewView FILL_CENTER hiển
-        // thị (phóng to phủ kín màn hình rồi cắt 2 bên) — bản cũ nhân thẳng với kích thước màn hình
-        // nên khung bị bóp hẹp/lệch khỏi mép giấy.
+        // Khung theo dõi biên tài liệu real-time. Map toạ độ đúng cách PreviewView FIT_CENTER hiển
+        // thị (bản 0.9: vừa khít trọn khung 4:3, căn giữa).
         Canvas(modifier = Modifier.fillMaxSize()) {
             val quad = detectedQuad
             if (quad != null && quad.points.size == 4) {
@@ -283,9 +287,10 @@ fun ScanCameraScreen(
             captureMode == CaptureMode.MANUAL -> if (detectedQuad != null) "Đã bắt được tài liệu — bấm nút để chụp" else "Đưa tài liệu vào khung hình"
             waitingForNewPage -> "Đã chụp ✓  Lật sang trang tiếp theo"
             detectedQuad == null -> "Đưa tài liệu vào khung hình"
-            captureHint == AutoCaptureController.Hint.EDGE -> "Đưa toàn bộ trang vào khung (đủ 4 góc)"
+            captureHint == AutoCaptureController.Hint.EDGE -> "Lùi máy ra một chút — cần thấy đủ 4 góc giấy"
+            captureHint == AutoCaptureController.Hint.TOO_SMALL -> "Đưa máy lại gần tài liệu hơn"
             autoProgress > 0f -> "Giữ yên…"
-            else -> "Đang căn chỉnh…"
+            else -> "Giữ yên máy để tự chụp"
         }
         Text(
             text = if (processingCount > 0) "$hint  •  đang xử lý $processingCount trang" else hint,
@@ -466,11 +471,11 @@ private fun ShutterButton(progress: Float, onClick: () -> Unit) {
     }
 }
 
-/** Map 4 góc chuẩn hoá (theo khung phân tích đứng) sang toạ độ màn hình của PreviewView FILL_CENTER. */
+/** Map 4 góc chuẩn hoá (theo khung phân tích đứng) sang toạ độ màn hình của PreviewView FIT_CENTER. */
 private fun mapToView(quad: DetectedQuad, view: ComposeSize): List<Offset> {
     val fw = quad.frameWidth.toFloat().coerceAtLeast(1f)
     val fh = quad.frameHeight.toFloat().coerceAtLeast(1f)
-    val scale = maxOf(view.width / fw, view.height / fh)
+    val scale = minOf(view.width / fw, view.height / fh)
     val dx = (view.width - fw * scale) / 2f
     val dy = (view.height - fh * scale) / 2f
     return quad.points.map { Offset(it.x * fw * scale + dx, it.y * fh * scale + dy) }

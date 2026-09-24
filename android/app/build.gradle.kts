@@ -107,8 +107,14 @@ dependencies {
 
     implementation("androidx.core:core-splashscreen:1.0.1")
 
-    // CameraX: camera tự viết (preview + phân tích từng khung hình) thay cho UI camera có sẵn
-    // của Google ML Kit Document Scanner — cần để tự kiểm soát tốc độ/độ chính xác tự động chụp.
+    // Bản 0.9: bộ quét tài liệu của Google (ML Kit Document Scanner — cùng bộ Scanner Pro Android đang
+    // dùng): tự chụp, bắt khung, Bộ lọc / Cắt và xoay / Làm sạch (xoá vết bẩn, ngón tay) / xoá bóng.
+    // Chạy trên máy, không cần quyền camera; model + giao diện do Google Play services tải về (~300 KB
+    // thêm vào APK). Máy không có Google Play hoặc RAM < 1,7 GB → ScanX tự lùi về camera tự viết bên dưới.
+    implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0")
+
+    // CameraX: camera tự viết của ScanX (preview + phân tích từng khung hình) — bản 0.9 là bộ quét dự
+    // phòng/tuỳ chọn trong Cài đặt quét, bộ quét mặc định là Google ML Kit Document Scanner ở trên.
     val cameraXVersion = "1.4.0"
     implementation("androidx.camera:camera-core:$cameraXVersion")
     implementation("androidx.camera:camera-camera2:$cameraXVersion")

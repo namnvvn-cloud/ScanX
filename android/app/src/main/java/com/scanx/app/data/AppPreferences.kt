@@ -3,6 +3,9 @@ package com.scanx.app.data
 import android.content.Context
 
 enum class CaptureMode { AUTO, MANUAL }
+
+/** Bộ quét dùng khi bấm "Quét" (bản 0.9): Google ML Kit Document Scanner (mặc định) hoặc camera tự viết ScanX. */
+enum class ScanEngine { GOOGLE, SCANX }
 enum class SortOrder { DATE_MODIFIED, DATE_CREATED, NAME }
 enum class ViewMode { GRID, LIST }
 
@@ -26,6 +29,13 @@ class AppPreferences(context: Context) {
     var autoCaptureStableFrames: Int
         get() = prefs.getInt(KEY_STABLE_FRAMES, DEFAULT_STABLE_FRAMES)
         set(value) = prefs.edit().putInt(KEY_STABLE_FRAMES, value.coerceIn(3, 15)).apply()
+
+    /** Bản 0.9: bộ quét mặc định. Máy không hỗ trợ bộ quét Google thì app tự lùi về [ScanEngine.SCANX]. */
+    var scanEngine: ScanEngine
+        get() = runCatching {
+            ScanEngine.valueOf(prefs.getString(KEY_SCAN_ENGINE, ScanEngine.GOOGLE.name)!!)
+        }.getOrDefault(ScanEngine.GOOGLE)
+        set(value) = prefs.edit().putString(KEY_SCAN_ENGINE, value.name).apply()
 
     var autoOcrEnabled: Boolean
         get() = prefs.getBoolean(KEY_AUTO_OCR, true)
@@ -91,6 +101,7 @@ class AppPreferences(context: Context) {
     companion object {
         private const val ENC_PREFIX = "enc1:"
         private const val KEY_CAPTURE_MODE = "capture_mode"
+        private const val KEY_SCAN_ENGINE = "scan_engine"
         private const val KEY_STABLE_FRAMES = "auto_capture_stable_frames"
         private const val KEY_AUTO_OCR = "auto_ocr_enabled"
         private const val KEY_FLASH = "flash_enabled"

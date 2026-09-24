@@ -16,12 +16,14 @@ import com.scanx.app.data.CaptureMode
 import com.scanx.app.data.PageFilter
 import com.scanx.app.scan.AiDocumentDetector
 import com.scanx.app.scan.AutoCaptureController
+import com.scanx.app.scan.CameraMotionMeter
 import com.scanx.app.scan.CapturedPage
 import com.scanx.app.scan.DetectedQuad
+import com.scanx.app.scan.DocumentTracker
+import com.scanx.app.scan.HeatmapPeaks
 import com.scanx.app.scan.ImageProxyUtils
 import com.scanx.app.scan.PageRectifier
 import com.scanx.app.scan.PerspectiveTransformer
-import com.scanx.app.scan.QuadSmoother
 import com.scanx.app.scan.ScanFilters
 import com.scanx.app.scan.maxCornerDistance
 import com.scanx.app.data.PdfExportMode
@@ -43,8 +45,10 @@ import java.util.concurrent.Executors
 
 /**
  * Điều phối 1 phiên quét:
- *  - Luồng phân tích (ImageAnalysis RGBA 640×480): AI DocAligner phát hiện 4 góc → làm mượt →
- *    [AutoCaptureController] (giữ yên 0,45 s — rất yên thì 0,27 s, đủ nét, đủ 4 góc, chỉ chụp TRANG MỚI).
+ *  - Luồng phân tích (ImageAnalysis RGBA 640×480): AI DocAligner ra 4 heatmap góc → [HeatmapPeaks]
+ *    chọn đỉnh (ưu tiên đỉnh gần khung đang theo dõi) → [DocumentTracker] (bắt/giữ khung, lọc
+ *    One-Euro, chịu khung mất phát hiện thoáng qua) → [AutoCaptureController] (bản 0.9: đứng yên theo
+ *    tốc độ khung đã lọc; 0,45 s — yên 0,27 s — cực yên 0,18 s; đủ nét, đủ 4 góc, chỉ chụp TRANG MỚI).
  *  - Khi chụp: ảnh ~8 MP → AI chạy lại trên ảnh chụp → tinh chỉnh góc dưới-pixel → làm phẳng đúng
  *    tỉ lệ giấy thật → nắn dòng chữ ([PageRectifier]) → kiểm tra trùng trang lần 2 trên ảnh đã nắn →
  *    lưu master màu ra đĩa, hiển thị bản đen trắng (chế độ mặc định). Xử lý nối tiếp theo thứ tự chụp.
@@ -52,7 +56,11 @@ import java.util.concurrent.Executors
 class ScanCameraViewModel(application: Application) : AndroidViewModel(application) {
 
     private val prefs = AppPreferences(application)
-    private val smoother = QuadSmoother()
+    /** Bản 0.9: chỉ dùng trên luồng phân tích; luồng khác muốn xoá trạng thái thì bật [resetTrackerRequested]. */
+    private val tracker = DocumentTracker()
+    /** Bản 0.9: đo độ dịch ảnh giữa các khung (máy đứng yên hay đang lia) — cùng luồng phân tích. */
+    private val motionMeter = CameraMotionMeter()
+    @Volatile private var resetTrackerRequested = false
     private val autoController = AutoCaptureController(holdMillis = prefs.autoCaptureStableFrames * HOLD_MS_PER_STEP)
     private val captureExecutor = Executors.newSingleThreadExecutor()
     private val processMutex = Mutex()
@@ -146,19 +154,30 @@ class ScanCameraViewModel(application: Application) : AndroidViewModel(applicati
     fun onFrameAnalyzed(image: ImageProxy) {
         try {
             if (isCapturing || !_isAiReady.value) return
+            if (resetTrackerRequested) {
+                resetTrackerRequested = false
+                tracker.reset()
+                motionMeter.reset()
+            }
             val frame = ImageProxyUtils.rgbaToUprightBgr(image)
             try {
-                val raw = AiDocumentDetector.detect(frame)
-                val quad = smoother.update(raw)
+                val now = SystemClock.elapsedRealtime()
+                val motion = motionMeter.update(frame, now)
+                val heatmaps = AiDocumentDetector.detectHeatmaps(frame)
+                val corners = heatmaps?.let { HeatmapPeaks.extract(it.maps, it.width, it.height, tracker.priors) }
+                val track = tracker.update(corners, frame.cols(), frame.rows(), now, motion)
+                val quad = track?.quad
                 latestQuad = quad
                 _detectedQuad.value = quad
 
-                val signature = if (quad != null) AiDocumentDetector.pageSignature(frame, quad) else null
-                latestSignature = signature
+                // Chữ ký chỉ tính trên khung có phát hiện MỚI (khung "trôi" dùng lại toạ độ cũ, không đáng tin).
+                val fresh = track?.fresh == true
+                val signature = if (quad != null && fresh) AiDocumentDetector.pageSignature(frame, quad) else null
+                if (signature != null || quad == null) latestSignature = signature
 
                 if (_captureMode.value == CaptureMode.AUTO) {
-                    val now = SystemClock.elapsedRealtime()
-                    val decision = autoController.onFrame(quad, signature, now)
+                    val sharpSignature = if (quad != null && fresh) AiDocumentDetector.pageSignatureSharp(frame, quad) else null
+                    val decision = autoController.onFrame(track, signature, sharpSignature, motion, now)
                     _autoProgress.value = decision.progress
                     _waitingForNewPage.value = decision.waitingForNewPage
                     _captureHint.value = decision.hint
@@ -209,7 +228,6 @@ class ScanCameraViewModel(application: Application) : AndroidViewModel(applicati
                 } finally {
                     image.close()
                     isCapturing = false
-                    smoother.reset()
                 }
                 if (bitmap != null) processCaptured(bitmap, liveQuad, auto, afterRemoval)
             }
@@ -412,7 +430,7 @@ class ScanCameraViewModel(application: Application) : AndroidViewModel(applicati
         }
         _pages.value = emptyList()
         autoController.reset()
-        smoother.reset()
+        resetTrackerRequested = true
         lastPageSignature = null
     }
 

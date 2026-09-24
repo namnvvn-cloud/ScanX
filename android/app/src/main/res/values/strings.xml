@@ -101,6 +101,16 @@
     <string name="scanning_auto_sensitivity_fast">Nhanh</string>
     <string name="scanning_auto_sensitivity_slow">Chuẩn</string>
     <string name="scanning_flash_default">Bật đèn flash mặc định</string>
+    <string name="scanning_engine">Bộ quét</string>
+    <string name="scanning_engine_desc">Google: tự chụp, bắt khung nhanh trên mọi nền, có sẵn Bộ lọc / Cắt xoay / Làm sạch / Xoá bóng (cùng bộ quét Scanner Pro Android dùng). Camera ScanX: camera riêng của app, chụp liên tục khi lật trang, dùng khi máy không có Google Play.</string>
+    <string name="scanning_engine_google">Google (khuyên dùng)</string>
+    <string name="scanning_engine_scanx">Camera ScanX</string>
+    <string name="scanning_scanx_only">Các mục dưới đây chỉ áp dụng cho Camera ScanX</string>
+    <string name="scan_google_unavailable">Máy chưa dùng được bộ quét Google (%1$s) — chuyển sang Camera ScanX</string>
+    <string name="detail_tool_filter">Bộ lọc</string>
+    <string name="detail_tool_crop">Cắt xoay</string>
+    <string name="detail_tool_clean">Làm sạch</string>
+    <string name="detail_page_of">Trang %1$d/%2$d</string>
 
     <!-- Advanced settings sub-screen -->
     <string name="advanced_settings_title">Cài đặt nâng cao</string>
