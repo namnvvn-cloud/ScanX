@@ -1,7 +1,6 @@
 package com.scanx.app.convert
 
 import android.graphics.Bitmap
-import android.graphics.Rect
 import com.google.mlkit.nl.languageid.LanguageIdentification
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.Text
@@ -70,17 +69,28 @@ class MultiScriptOcr : Closeable {
         return l.copy(lang = lang, words = l.words.map { it.copy(lang = lang) })
     }
 
-    private fun Rect.toBox() = Box(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat())
-
     /** [blockBase] cộng vào số thứ tự khối ML Kit (bản 1.0) để khối của các bộ nhận dạng khác nhau không trùng số. */
-    private fun toLines(text: Text, blockBase: Int): List<OcrLine> {
-        val out = ArrayList<OcrLine>()
-        for ((bi, block) in text.textBlocks.withIndex()) for (line in block.lines) {
-            val rect = line.boundingBox ?: continue
-            val words = line.elements.mapNotNull { el -> el.boundingBox?.let { OcrWord(el.text, it.toBox(), 0, el.confidence) } }
-            out.add(OcrLine(line.text, rect.toBox(), words, 0f, 0, line.confidence, blockId = blockBase + bi))
+    private fun toLines(text: Text, blockBase: Int): List<OcrLine> = linesOf(text, blockBase)
+
+    companion object {
+        /** Dòng OCR từ kết quả ML Kit, kèm số khối và 4 góc thật (bản 1.1) — dùng chung cho dịch trực tiếp. */
+        fun linesOf(text: Text, blockBase: Int): List<OcrLine> {
+            val out = ArrayList<OcrLine>()
+            for ((bi, block) in text.textBlocks.withIndex()) for (line in block.lines) {
+                val rect = line.boundingBox ?: continue
+                val words = line.elements.mapNotNull { el ->
+                    el.boundingBox?.let { OcrWord(el.text, Box(it.left.toFloat(), it.top.toFloat(), it.right.toFloat(), it.bottom.toFloat()), 0, el.confidence) }
+                }
+                val quad = line.cornerPoints?.takeIf { it.size == 4 }?.flatMap { listOf(it.x.toFloat(), it.y.toFloat()) }
+                out.add(
+                    OcrLine(
+                        line.text, Box(rect.left.toFloat(), rect.top.toFloat(), rect.right.toFloat(), rect.bottom.toFloat()),
+                        words, 0f, 0, line.confidence, blockId = blockBase + bi, quad = quad,
+                    ),
+                )
+            }
+            return out
         }
-        return out
     }
 
     override fun close() {

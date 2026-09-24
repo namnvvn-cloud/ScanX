@@ -10,6 +10,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.scanx.app.convert.GeminiTranslator
 import com.scanx.app.convert.GoogleTranslateClient
+import com.scanx.app.convert.LiveTranslator
 import com.scanx.app.convert.MlKitTranslator
 import com.scanx.app.convert.MultiScriptOcr
 import com.scanx.app.convert.PhotoTranslateRenderer
@@ -48,6 +49,11 @@ class CameraTranslateViewModel(application: Application) : AndroidViewModel(appl
     }
 
     private val prefs = AppPreferences(application)
+
+    /** Bản 1.1: dịch trực tiếp khi soi camera (ML Kit offline) — tạo khi mở camera dịch lần đầu. */
+    private var liveTranslator: LiveTranslator? = null
+    val live: LiveTranslator
+        get() = liveTranslator ?: LiveTranslator().also { liveTranslator = it }
     private val _state = MutableStateFlow<State>(State.Camera)
     val state: StateFlow<State> = _state.asStateFlow()
 
@@ -89,7 +95,13 @@ class CameraTranslateViewModel(application: Application) : AndroidViewModel(appl
                 return
             }
             _state.value = State.Working("Đang dịch ${todo.size} đoạn…")
-            val (translatedTexts, engine, notice) = withContext(Dispatchers.IO) { translateTexts(todo.map { it.value }) }
+            // Bản 1.1: dịch TỪNG ĐOẠN (tách theo xuống dòng trong khối) rồi ghép lại — giữ đúng dòng của
+            // danh sách/hội thoại thay vì máy dịch dồn cả khối thành 1 đoạn.
+            val texts = todo.map { it.value.text }
+            val (segments, counts) = PhotoTranslation.splitSegments(texts)
+            val langs = todo.flatMapIndexed { k, (_, b) -> List(counts[k]) { b.lang } }
+            val (segTr, engine, notice) = withContext(Dispatchers.IO) { translateTexts(segments, langs) }
+            val translatedTexts = PhotoTranslation.joinSegments(segTr, counts, texts)
             val perBlock = arrayOfNulls<String>(blocks.size)
             todo.forEachIndexed { k, (i, _) -> perBlock[i] = translatedTexts.getOrNull(k) }
             _state.value = State.Working("Đang ghép bản dịch vào ảnh…")
@@ -102,18 +114,18 @@ class CameraTranslateViewModel(application: Application) : AndroidViewModel(appl
     }
 
     /** Dịch lần lượt theo thứ tự ưu tiên; trả (bản dịch cùng thứ tự, tên máy dịch, ghi chú nếu phải đổi máy). */
-    private suspend fun translateTexts(blocks: List<PhotoTranslation.TextBlock>): Triple<List<String?>, String, String?> {
+    private suspend fun translateTexts(texts: List<String>, langs: List<String>): Triple<List<String?>, String, String?> {
         val errors = ArrayList<String>()
         val googleKey = prefs.googleTranslateKey
         if (googleKey.isNotBlank()) {
             try {
-                val res = GoogleTranslateClient(googleKey).translate(blocks.map { it.text }, Translation.TARGET)
+                val res = GoogleTranslateClient(googleKey).translate(texts, Translation.TARGET)
                 return Triple(res.map { it.text }, "Google Dịch", null)
             } catch (e: Throwable) {
                 errors.add(e.message ?: "Google Dịch lỗi")
             }
         }
-        val items = blocks.mapIndexed { i, b -> Translation.Item("b$i", b.text, b.lang) }
+        val items = texts.mapIndexed { i, t -> Translation.Item("b$i", t, langs.getOrElse(i) { "" }) }
         val geminiKey = prefs.geminiApiKey
         if (geminiKey.isNotBlank()) {
             try {
@@ -161,6 +173,8 @@ class CameraTranslateViewModel(application: Application) : AndroidViewModel(appl
 
     override fun onCleared() {
         super.onCleared()
+        liveTranslator?.close()
+        liveTranslator = null
         reset()
     }
 

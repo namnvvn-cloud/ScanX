@@ -46,6 +46,12 @@ data class OcrLine(
     val italic: Boolean = false,
     /** Bản 1.0: số khối chữ (TextBlock) ML Kit gán cho dòng — dùng gom đoạn khi "Chụp để dịch"; -1 = không rõ. */
     val blockId: Int = -1,
+    /**
+     * Bản 1.1: 4 góc thật của dòng (x0,y0 trên-trái, x1,y1 trên-phải, x2,y2 dưới-phải, x3,y3 dưới-trái) theo
+     * ML Kit — chữ nghiêng theo trang chụp xiên thì khung chữ nhật [box] bị phình cao, dùng 4 góc này để
+     * tính đúng góc xoay và chiều cao dòng khi vẽ bản dịch đè. null = không có.
+     */
+    val quad: List<Float>? = null,
 )
 
 /** Đoạn đường kẻ (ngang hoặc dọc) tách được từ ảnh bằng morphology. */

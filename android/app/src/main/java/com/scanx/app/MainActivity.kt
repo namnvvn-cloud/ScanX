@@ -226,14 +226,19 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    // Bản 1.0: Scan tự động / Scan thủ công dùng camera ScanX — QUÉT LIÊN TỤC nhiều trang, chỉ
-                    // dừng khi người dùng bấm "Xong" rồi mới sang màn tài liệu để chỉnh sửa. Bộ quét Google
-                    // (dừng lại xem/sửa sau MỖI trang — API không cho tắt) chỉ dùng khi chọn trong Cài đặt quét.
+                    // Bản 1.1 (quyết định của anh Nam): Scan tự động / Scan thủ công dùng BỘ QUÉT GOOGLE (ML Kit
+                    // Document Scanner) — không dùng thuật toán bắt khung tự viết. Quét nhiều trang bằng nút +
+                    // (Thêm trang) trên màn xem trước của Google; bấm Xong → lưu → mở màn chỉnh sửa. API của Google
+                    // không cho bỏ màn xem trước sau mỗi trang, cũng không cho chọn sẵn chế độ chụp tay (nút
+                    // "Tự động" nằm trên camera Google). Camera ScanX chỉ còn khi chọn trong Cài đặt quét.
                     fun startScan(mode: CaptureMode = prefs.captureMode) {
                         if (prefs.scanEngine == ScanEngine.SCANX) {
                             pendingCaptureMode = mode
                             requestCameraThenOpen(Screen.Camera)
                             return
+                        }
+                        if (mode == CaptureMode.MANUAL) {
+                            Toast.makeText(context, getString(R.string.scan_google_manual_hint), Toast.LENGTH_LONG).show()
                         }
                         val options = GmsDocumentScannerOptions.Builder()
                             .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
@@ -252,6 +257,7 @@ class MainActivity : ComponentActivity() {
                                     getString(R.string.scan_google_unavailable, e.message ?: ""),
                                     Toast.LENGTH_LONG,
                                 ).show()
+                                pendingCaptureMode = mode
                                 requestCameraThenOpen()
                             }
                     }

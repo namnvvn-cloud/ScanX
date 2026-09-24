@@ -31,13 +31,13 @@ class AppPreferences(context: Context) {
         get() = prefs.getInt(KEY_STABLE_FRAMES, DEFAULT_STABLE_FRAMES)
         set(value) = prefs.edit().putInt(KEY_STABLE_FRAMES, value.coerceIn(3, 15)).apply()
 
-    /** Bộ quét (bản 1.0 mặc định [ScanEngine.SCANX] — quét liên tục). Máy không hỗ trợ bộ quét Google
-     *  thì app tự lùi về [ScanEngine.SCANX]. Đọc khoá mới để máy đã cài 0.9 (mặc định Google) cũng chuyển
-     *  sang quét liên tục theo yêu cầu. */
+    /** Bộ quét (bản 1.1 mặc định [ScanEngine.GOOGLE] theo quyết định của anh Nam — dùng bộ quét Google, không
+     *  dùng thuật toán bắt khung tự viết). Máy không hỗ trợ bộ quét Google thì app tự lùi về camera ScanX.
+     *  Khoá mới để máy đã cài 1.0 (mặc định ScanX) cũng chuyển về Google. */
     var scanEngine: ScanEngine
         get() = runCatching {
-            ScanEngine.valueOf(prefs.getString(KEY_SCAN_ENGINE, ScanEngine.SCANX.name)!!)
-        }.getOrDefault(ScanEngine.SCANX)
+            ScanEngine.valueOf(prefs.getString(KEY_SCAN_ENGINE, ScanEngine.GOOGLE.name)!!)
+        }.getOrDefault(ScanEngine.GOOGLE)
         set(value) = prefs.edit().putString(KEY_SCAN_ENGINE, value.name).apply()
 
     var autoOcrEnabled: Boolean
@@ -109,7 +109,7 @@ class AppPreferences(context: Context) {
     companion object {
         private const val ENC_PREFIX = "enc1:"
         private const val KEY_CAPTURE_MODE = "capture_mode"
-        private const val KEY_SCAN_ENGINE = "scan_engine_v10"
+        private const val KEY_SCAN_ENGINE = "scan_engine_v11"
         private const val KEY_STABLE_FRAMES = "auto_capture_stable_frames"
         private const val KEY_AUTO_OCR = "auto_ocr_enabled"
         private const val KEY_FLASH = "flash_enabled"
