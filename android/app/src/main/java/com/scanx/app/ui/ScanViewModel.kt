@@ -170,6 +170,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun translationEngine(choice: TranslationChoice): TranslationEngine = when {
+        choice == TranslationChoice.GOOGLE && prefs.googleTranslateKey.isNotBlank() -> com.scanx.app.convert.GoogleCloudTranslator(prefs.googleTranslateKey)
         choice == TranslationChoice.CLAUDE && prefs.cloudApiKey.isNotBlank() -> ClaudeTranslator(prefs.cloudApiKey, prefs.cloudModel)
         choice == TranslationChoice.GEMINI && prefs.geminiApiKey.isNotBlank() -> GeminiTranslator(prefs.geminiApiKey, prefs.geminiModel)
         else -> MlKitTranslator()

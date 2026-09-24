@@ -13,8 +13,8 @@ interface TranslationEngine {
     suspend fun translate(items: List<Translation.Item>, context: String, onProgress: (Int, Int) -> Unit): Map<String, String>
 }
 
-/** 3 máy dịch người dùng có thể chọn ở hộp thoại "Dịch sang tiếng Việt". */
-enum class TranslationChoice { CLAUDE, GEMINI, MLKIT }
+/** Máy dịch người dùng có thể chọn ở hộp thoại "Dịch sang tiếng Việt" (bản 1.0 thêm Google Dịch Cloud). */
+enum class TranslationChoice { GOOGLE, CLAUDE, GEMINI, MLKIT }
 
 /**
  * Dịch bằng Claude (mô hình ngôn ngữ lớn): hiểu ngữ cảnh cả tài liệu, thuật ngữ chuyên ngành, văn phong

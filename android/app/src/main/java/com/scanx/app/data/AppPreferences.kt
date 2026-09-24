@@ -4,7 +4,8 @@ import android.content.Context
 
 enum class CaptureMode { AUTO, MANUAL }
 
-/** Bộ quét dùng khi bấm "Quét" (bản 0.9): Google ML Kit Document Scanner (mặc định) hoặc camera tự viết ScanX. */
+/** Bộ quét dùng cho "Scan tự động/thủ công": bản 1.0 mặc định camera ScanX (quét LIÊN TỤC nhiều trang);
+ *  Google ML Kit Document Scanner (dừng xem/sửa sau mỗi trang) là tuỳ chọn trong Cài đặt quét. */
 enum class ScanEngine { GOOGLE, SCANX }
 enum class SortOrder { DATE_MODIFIED, DATE_CREATED, NAME }
 enum class ViewMode { GRID, LIST }
@@ -30,11 +31,13 @@ class AppPreferences(context: Context) {
         get() = prefs.getInt(KEY_STABLE_FRAMES, DEFAULT_STABLE_FRAMES)
         set(value) = prefs.edit().putInt(KEY_STABLE_FRAMES, value.coerceIn(3, 15)).apply()
 
-    /** Bản 0.9: bộ quét mặc định. Máy không hỗ trợ bộ quét Google thì app tự lùi về [ScanEngine.SCANX]. */
+    /** Bộ quét (bản 1.0 mặc định [ScanEngine.SCANX] — quét liên tục). Máy không hỗ trợ bộ quét Google
+     *  thì app tự lùi về [ScanEngine.SCANX]. Đọc khoá mới để máy đã cài 0.9 (mặc định Google) cũng chuyển
+     *  sang quét liên tục theo yêu cầu. */
     var scanEngine: ScanEngine
         get() = runCatching {
-            ScanEngine.valueOf(prefs.getString(KEY_SCAN_ENGINE, ScanEngine.GOOGLE.name)!!)
-        }.getOrDefault(ScanEngine.GOOGLE)
+            ScanEngine.valueOf(prefs.getString(KEY_SCAN_ENGINE, ScanEngine.SCANX.name)!!)
+        }.getOrDefault(ScanEngine.SCANX)
         set(value) = prefs.edit().putString(KEY_SCAN_ENGINE, value.name).apply()
 
     var autoOcrEnabled: Boolean
@@ -63,6 +66,11 @@ class AppPreferences(context: Context) {
     var geminiApiKey: String
         get() = readSecret(KEY_GEMINI_KEY)
         set(value) = writeSecret(KEY_GEMINI_KEY, value.trim())
+
+    /** Bản 1.0: API key Google Cloud Translation (Google Dịch) — mã hoá như [cloudApiKey]. */
+    var googleTranslateKey: String
+        get() = readSecret(KEY_GOOGLE_TRANSLATE_KEY)
+        set(value) = writeSecret(KEY_GOOGLE_TRANSLATE_KEY, value.trim())
 
     var geminiModel: String
         get() = prefs.getString(KEY_GEMINI_MODEL, "gemini-2.5-flash").orEmpty().ifBlank { "gemini-2.5-flash" }
@@ -101,7 +109,7 @@ class AppPreferences(context: Context) {
     companion object {
         private const val ENC_PREFIX = "enc1:"
         private const val KEY_CAPTURE_MODE = "capture_mode"
-        private const val KEY_SCAN_ENGINE = "scan_engine"
+        private const val KEY_SCAN_ENGINE = "scan_engine_v10"
         private const val KEY_STABLE_FRAMES = "auto_capture_stable_frames"
         private const val KEY_AUTO_OCR = "auto_ocr_enabled"
         private const val KEY_FLASH = "flash_enabled"
@@ -110,6 +118,7 @@ class AppPreferences(context: Context) {
         private const val KEY_CLOUD_KEY = "cloud_api_key"
         private const val KEY_CLOUD_MODEL = "cloud_model"
         private const val KEY_GEMINI_KEY = "gemini_api_key"
+        private const val KEY_GOOGLE_TRANSLATE_KEY = "google_translate_api_key"
         private const val KEY_GEMINI_MODEL = "gemini_model"
         const val DEFAULT_STABLE_FRAMES = 5
     }

@@ -20,6 +20,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.scanx.app.R
@@ -42,9 +43,13 @@ fun TranslateDialog(
     onOpenGeminiSettings: () -> Unit,
     onConfirm: (engine: TranslationChoice, cloudOcr: Boolean, bilingual: Boolean, output: ExportFormat, share: Boolean) -> Unit,
 ) {
+    // Bản 1.0: Google Dịch (Cloud Translation) — đọc thẳng từ Cài đặt, nhập key ở mục "Google Dịch".
+    val context = LocalContext.current
+    val googleConfigured = remember { com.scanx.app.data.AppPreferences(context).googleTranslateKey.isNotBlank() }
     var engine by remember {
         mutableStateOf(
             when {
+                googleConfigured -> TranslationChoice.GOOGLE
                 geminiConfigured -> TranslationChoice.GEMINI
                 cloudConfigured -> TranslationChoice.CLAUDE
                 else -> TranslationChoice.MLKIT
@@ -61,6 +66,16 @@ fun TranslateDialog(
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text(stringResource(R.string.translate_desc), style = MaterialTheme.typography.bodySmall)
                 Text(stringResource(R.string.translate_engine), style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 12.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().clickable { if (googleConfigured) engine = TranslationChoice.GOOGLE },
+                ) {
+                    RadioButton(selected = engine == TranslationChoice.GOOGLE, enabled = googleConfigured, onClick = { engine = TranslationChoice.GOOGLE })
+                    Text(
+                        stringResource(if (googleConfigured) R.string.translate_engine_google else R.string.translate_engine_google_off),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth().clickable { if (geminiConfigured) engine = TranslationChoice.GEMINI else onOpenGeminiSettings() },

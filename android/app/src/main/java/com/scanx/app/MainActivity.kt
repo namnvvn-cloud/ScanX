@@ -14,6 +14,7 @@ import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import com.scanx.app.data.ScanEngine
+import com.scanx.app.data.CaptureMode
 import com.scanx.app.ui.screens.PageEditTool
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -37,6 +38,7 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -61,6 +63,7 @@ import com.scanx.app.ui.screens.AdvancedSettingsScreen
 import com.scanx.app.convert.TranslationChoice
 import com.scanx.app.ui.screens.CloudSettingsDialog
 import com.scanx.app.ui.screens.GeminiSettingsDialog
+import com.scanx.app.ui.screens.GoogleTranslateSettingsDialog
 import com.scanx.app.ui.screens.TranslateDialog
 import com.scanx.app.ui.screens.DocumentDetailScreen
 import com.scanx.app.ui.screens.HomeScreen
@@ -80,6 +83,8 @@ private sealed class Screen {
     data object AdvancedSettings : Screen()
     data object Trash : Screen()
     data class Detail(val documentId: String) : Screen()
+    /** Bản 1.0: "Chụp để dịch" (kiểu Google Dịch). */
+    data object Translate : Screen()
 }
 
 /** Hộp thoại "Lưu vào máy" (Storage Access Framework) với MIME + tên file chọn lúc chạy. */
@@ -121,6 +126,9 @@ class MainActivity : ComponentActivity() {
                     var showCloudSettings by remember { mutableStateOf(false) }
                     var cloudConfigured by remember { mutableStateOf(viewModel.isCloudConfigured) }
                     var showGeminiSettings by remember { mutableStateOf(false) }
+                    // Bản 1.0: Google Dịch (Cloud Translation) — API key riêng.
+                    var showGoogleTranslateSettings by remember { mutableStateOf(false) }
+                    var googleTranslateConfigured by remember { mutableStateOf(com.scanx.app.data.AppPreferences(context).googleTranslateKey.isNotBlank()) }
                     var geminiConfigured by remember { mutableStateOf(viewModel.isGeminiConfigured) }
                     var convertWithCloud by remember { mutableStateOf(false) }
                     var translateUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
@@ -182,21 +190,26 @@ class MainActivity : ComponentActivity() {
                         if (uris.isNotEmpty()) viewModel.importImages(uris)
                     }
 
+                    // Bản 1.0: màn cần camera sẽ mở sau khi cấp quyền (camera quét hoặc chụp để dịch).
+                    var afterCameraPermission by remember { mutableStateOf<Screen>(Screen.Camera) }
+                    // Chế độ chụp áp cho camera ScanX lúc mở (Scan tự động / Scan thủ công).
+                    var pendingCaptureMode by remember { mutableStateOf(prefs.captureMode) }
                     val cameraPermissionLauncher = rememberLauncherForActivityResult(
                         ActivityResultContracts.RequestPermission()
                     ) { granted ->
                         if (granted) {
-                            screen = Screen.Camera
+                            screen = afterCameraPermission
                         } else {
                             Toast.makeText(context, getString(R.string.camera_permission_denied), Toast.LENGTH_LONG).show()
                         }
                     }
 
-                    fun requestCameraThenOpen() {
+                    fun requestCameraThenOpen(target: Screen = Screen.Camera) {
                         val granted = ContextCompat.checkSelfPermission(
                             context, android.Manifest.permission.CAMERA
                         ) == PackageManager.PERMISSION_GRANTED
-                        if (granted) screen = Screen.Camera else cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
+                        afterCameraPermission = target
+                        if (granted) screen = target else cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
                     }
 
                     // Bản 0.9: bộ quét Google (ML Kit Document Scanner, chế độ FULL — Bộ lọc/Cắt xoay/Làm
@@ -213,9 +226,13 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    fun startScan() {
+                    // Bản 1.0: Scan tự động / Scan thủ công dùng camera ScanX — QUÉT LIÊN TỤC nhiều trang, chỉ
+                    // dừng khi người dùng bấm "Xong" rồi mới sang màn tài liệu để chỉnh sửa. Bộ quét Google
+                    // (dừng lại xem/sửa sau MỖI trang — API không cho tắt) chỉ dùng khi chọn trong Cài đặt quét.
+                    fun startScan(mode: CaptureMode = prefs.captureMode) {
                         if (prefs.scanEngine == ScanEngine.SCANX) {
-                            requestCameraThenOpen()
+                            pendingCaptureMode = mode
+                            requestCameraThenOpen(Screen.Camera)
                             return
                         }
                         val options = GmsDocumentScannerOptions.Builder()
@@ -237,6 +254,16 @@ class MainActivity : ComponentActivity() {
                                 ).show()
                                 requestCameraThenOpen()
                             }
+                    }
+
+                    // Bản 1.0: nút Back của Android quay về màn trước thay vì thoát app (camera quét và
+                    // chụp để dịch tự xử lý Back để không mất trang đã chụp/ảnh đã dịch).
+                    BackHandler(enabled = screen !is Screen.Home && screen !is Screen.Camera && screen !is Screen.Translate) {
+                        when {
+                            editingDetailPage != null -> { editingDetailPage = null; editingDetailTool = null }
+                            screen is Screen.ScanningSettings || screen is Screen.AdvancedSettings -> screen = Screen.Settings
+                            else -> screen = Screen.Home
+                        }
                     }
 
                     when (val current = screen) {
@@ -266,15 +293,28 @@ class MainActivity : ComponentActivity() {
                                 onSettingsClick = { screen = Screen.Settings },
                                 onTrashClick = { screen = Screen.Trash },
                                 onImportFilesClick = { importLauncher.launch("image/*") },
-                                onCameraClick = { startScan() },
+                                onScanAuto = { startScan(CaptureMode.AUTO) },
+                                onScanManual = { startScan(CaptureMode.MANUAL) },
+                                onCameraTranslate = { requestCameraThenOpen(Screen.Translate) },
                                 onComingSoon = { showComingSoon() },
                                 onConvertFiles = { convertPicker.launch(arrayOf("application/pdf", "image/*")) },
                                 onTranslateFiles = { translatePicker.launch(arrayOf("application/pdf", "image/*")) },
                             )
                         }
 
+                        is Screen.Translate -> {
+                            val translateViewModel: com.scanx.app.ui.CameraTranslateViewModel = viewModel()
+                            com.scanx.app.ui.screens.CameraTranslateScreen(
+                                viewModel = translateViewModel,
+                                onClose = { screen = Screen.Home },
+                            )
+                        }
+
                         is Screen.Camera -> {
                             val cameraViewModel: ScanCameraViewModel = viewModel()
+                            // Áp chế độ Tự động/Thủ công người dùng vừa chọn ở menu camera (ViewModel sống theo
+                            // Activity nên không tự đọc lại Cài đặt mỗi lần mở).
+                            LaunchedEffect(cameraViewModel, pendingCaptureMode) { cameraViewModel.setCaptureMode(pendingCaptureMode) }
                             ScanCameraScreen(
                                 viewModel = cameraViewModel,
                                 onClose = { screen = Screen.Home },
@@ -300,6 +340,8 @@ class MainActivity : ComponentActivity() {
                                 onCloudAiClick = { showCloudSettings = true },
                                 geminiConfigured = geminiConfigured,
                                 onGeminiClick = { showGeminiSettings = true },
+                                googleTranslateConfigured = googleTranslateConfigured,
+                                onGoogleTranslateClick = { showGoogleTranslateSettings = true },
                                 onRecommendApp = { shareApp() },
                                 onComingSoon = { showComingSoon() },
                             )
@@ -446,6 +488,18 @@ class MainActivity : ComponentActivity() {
                                 viewModel.saveCloudSettings(key, model)
                                 cloudConfigured = key.isNotBlank()
                                 showCloudSettings = false
+                            },
+                        )
+                    }
+
+                    if (showGoogleTranslateSettings) {
+                        GoogleTranslateSettingsDialog(
+                            initialKey = prefs.googleTranslateKey,
+                            onDismiss = { showGoogleTranslateSettings = false },
+                            onSave = { key ->
+                                prefs.googleTranslateKey = key
+                                googleTranslateConfigured = key.isNotBlank()
+                                showGoogleTranslateSettings = false
                             },
                         )
                     }

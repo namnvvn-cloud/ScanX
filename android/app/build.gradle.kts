@@ -113,6 +113,9 @@ dependencies {
     // thêm vào APK). Máy không có Google Play hoặc RAM < 1,7 GB → ScanX tự lùi về camera tự viết bên dưới.
     implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0")
 
+    // Bản 1.0: đọc hướng xoay EXIF của ảnh chọn từ thư viện cho "Chụp để dịch".
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
+
     // CameraX: camera tự viết của ScanX (preview + phân tích từng khung hình) — bản 0.9 là bộ quét dự
     // phòng/tuỳ chọn trong Cài đặt quét, bộ quét mặc định là Google ML Kit Document Scanner ở trên.
     val cameraXVersion = "1.4.0"

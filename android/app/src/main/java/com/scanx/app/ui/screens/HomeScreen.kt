@@ -127,11 +127,15 @@ fun HomeScreen(
     onSettingsClick: () -> Unit,
     onTrashClick: () -> Unit,
     onImportFilesClick: () -> Unit,
-    onCameraClick: () -> Unit,
+    /** Bản 1.0: nút camera mở 3 lựa chọn — Dịch / Scan tự động / Scan thủ công. */
+    onScanAuto: () -> Unit,
+    onScanManual: () -> Unit,
+    onCameraTranslate: () -> Unit,
     onComingSoon: () -> Unit,
     onConvertFiles: () -> Unit = {},
     onTranslateFiles: () -> Unit = {},
 ) {
+    var showCaptureSheet by remember { mutableStateOf(false) }
     var selectMode by rememberSaveable { mutableStateOf(false) }
     var selectedIds by rememberSaveable { mutableStateOf(setOf<String>()) }
     var showMoreMenu by remember { mutableStateOf(false) }
@@ -263,7 +267,7 @@ fun HomeScreen(
             if (!selectMode) {
                 HomeBottomBar(
                     onToolsClick = { showToolsSheet = true },
-                    onCameraClick = onCameraClick,
+                    onCameraClick = { showCaptureSheet = true },
                     onGalleryClick = onImportFilesClick,
                 )
             }
@@ -355,10 +359,19 @@ fun HomeScreen(
     if (showToolsSheet) {
         ToolsBottomSheet(
             onDismiss = { showToolsSheet = false },
-            onDocumentClick = { showToolsSheet = false; onCameraClick() },
+            onDocumentClick = { showToolsSheet = false; onScanAuto() },
             onConvertClick = { showToolsSheet = false; onConvertFiles() },
             onTranslateClick = { showToolsSheet = false; onTranslateFiles() },
             onComingSoon = { showToolsSheet = false; onComingSoon() },
+        )
+    }
+
+    if (showCaptureSheet) {
+        CaptureModeSheet(
+            onDismiss = { showCaptureSheet = false },
+            onTranslate = { showCaptureSheet = false; onCameraTranslate() },
+            onScanAuto = { showCaptureSheet = false; onScanAuto() },
+            onScanManual = { showCaptureSheet = false; onScanManual() },
         )
     }
 
@@ -727,6 +740,41 @@ private fun ToolsBottomSheet(
                 ToolItem(Icons.Filled.Translate, stringResource(R.string.tools_translate), locked = false, onClick = onTranslateClick)
                 Spacer(Modifier.width(76.dp))
             }
+        }
+    }
+}
+
+/** Bản 1.0: 3 lựa chọn khi bấm nút camera — Dịch / Scan tự động / Scan thủ công. */
+@Composable
+private fun CaptureModeSheet(
+    onDismiss: () -> Unit,
+    onTranslate: () -> Unit,
+    onScanAuto: () -> Unit,
+    onScanManual: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(modifier = Modifier.padding(bottom = 28.dp)) {
+            CaptureOption(Icons.Filled.Translate, stringResource(R.string.capture_translate), stringResource(R.string.capture_translate_desc), onTranslate)
+            CaptureOption(Icons.Filled.AutoAwesome, stringResource(R.string.capture_scan_auto), stringResource(R.string.capture_scan_auto_desc), onScanAuto)
+            CaptureOption(Icons.Filled.CameraAlt, stringResource(R.string.capture_scan_manual), stringResource(R.string.capture_scan_manual_desc), onScanManual)
+        }
+    }
+}
+
+@Composable
+private fun CaptureOption(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, desc: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center,
+        ) { Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
+        Column(modifier = Modifier.padding(start = 16.dp).weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

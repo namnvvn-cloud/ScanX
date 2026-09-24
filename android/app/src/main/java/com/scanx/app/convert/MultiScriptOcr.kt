@@ -36,21 +36,21 @@ class MultiScriptOcr : Closeable {
 
     suspend fun recognize(bmp: Bitmap): List<OcrLine> {
         val image = InputImage.fromBitmap(bmp, 0)
-        val latinLines = toLines(latin.process(image).awaitTask())
+        val latinLines = toLines(latin.process(image).awaitTask(), 0)
         val needCjk = latinLines.isNotEmpty() && latinLines.any { it.confidence in 0.001f..0.6f }
         val merged = if (!needCjk) {
             latinLines
         } else {
             usedCjk = true
             val byRec = LinkedHashMap<String, List<OcrLine>>()
-            val ko = toLines(korean.process(image).awaitTask())
+            val ko = toLines(korean.process(image).awaitTask(), 100_000)
             byRec["ko"] = ko
             if (ko.none { Lang.count(it.text).hangul > 0 }) {
-                val ja = toLines(japanese.process(image).awaitTask())
+                val ja = toLines(japanese.process(image).awaitTask(), 200_000)
                 byRec["ja"] = ja
                 val hasKana = ja.any { Lang.count(it.text).kana > 0 }
                 if (!hasKana && ja.any { Lang.count(it.text).han > 0 }) {
-                    byRec["zh"] = toLines(chinese.process(image).awaitTask())
+                    byRec["zh"] = toLines(chinese.process(image).awaitTask(), 300_000)
                 }
             }
             ScriptMerge.merge(latinLines, byRec)
@@ -72,12 +72,13 @@ class MultiScriptOcr : Closeable {
 
     private fun Rect.toBox() = Box(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat())
 
-    private fun toLines(text: Text): List<OcrLine> {
+    /** [blockBase] cộng vào số thứ tự khối ML Kit (bản 1.0) để khối của các bộ nhận dạng khác nhau không trùng số. */
+    private fun toLines(text: Text, blockBase: Int): List<OcrLine> {
         val out = ArrayList<OcrLine>()
-        for (block in text.textBlocks) for (line in block.lines) {
+        for ((bi, block) in text.textBlocks.withIndex()) for (line in block.lines) {
             val rect = line.boundingBox ?: continue
             val words = line.elements.mapNotNull { el -> el.boundingBox?.let { OcrWord(el.text, it.toBox(), 0, el.confidence) } }
-            out.add(OcrLine(line.text, rect.toBox(), words, 0f, 0, line.confidence))
+            out.add(OcrLine(line.text, rect.toBox(), words, 0f, 0, line.confidence, blockId = blockBase + bi))
         }
         return out
     }

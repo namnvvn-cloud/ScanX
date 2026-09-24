@@ -5,6 +5,7 @@ import android.hardware.camera2.CameraCharacteristics
 import android.util.Size as AndroidSize
 import android.widget.Toast
 import androidx.camera.camera2.interop.Camera2CameraInfo
+import androidx.activity.compose.BackHandler
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
@@ -227,6 +228,16 @@ fun ScanCameraScreen(
         }
     }
 
+    // Bản 1.0: Back = đóng lớp đang mở; không có trang nào thì thoát; có trang thì hỏi trước khi huỷ.
+    BackHandler {
+        when {
+            editingIndex != null -> editingIndex = null
+            showReview -> showReview = false
+            pages.isEmpty() -> onClose()
+            else -> showDiscardConfirm = true
+        }
+    }
+
     LaunchedEffect(isFlashOn, camera) {
         camera?.cameraControl?.enableTorch(isFlashOn)
     }
@@ -284,8 +295,12 @@ fun ScanCameraScreen(
         // Dòng trạng thái hướng dẫn người dùng.
         val hint = when {
             !isAiReady -> "Đang khởi động AI nhận diện…"
-            captureMode == CaptureMode.MANUAL -> if (detectedQuad != null) "Đã bắt được tài liệu — bấm nút để chụp" else "Đưa tài liệu vào khung hình"
-            waitingForNewPage -> "Đã chụp ✓  Lật sang trang tiếp theo"
+            captureMode == CaptureMode.MANUAL -> when {
+                detectedQuad == null -> "Đưa tài liệu vào khung hình"
+                pages.isEmpty() -> "Đã bắt được tài liệu — bấm nút để chụp"
+                else -> "Đã chụp ${pages.size} trang — chụp tiếp hoặc bấm Xong"
+            }
+            waitingForNewPage -> "Đã chụp ${pages.size} trang ✓  Lật trang tiếp — bấm Xong khi hoàn tất"
             detectedQuad == null -> "Đưa tài liệu vào khung hình"
             captureHint == AutoCaptureController.Hint.EDGE -> "Lùi máy ra một chút — cần thấy đủ 4 góc giấy"
             captureHint == AutoCaptureController.Hint.TOO_SMALL -> "Đưa máy lại gần tài liệu hơn"

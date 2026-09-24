@@ -44,6 +44,8 @@ data class OcrLine(
     val lang: String = "",
     /** Chữ nghiêng (italic) — suy từ độ xiên nét chữ (bản 0.7), xem [PageLayoutExtractor]. */
     val italic: Boolean = false,
+    /** Bản 1.0: số khối chữ (TextBlock) ML Kit gán cho dòng — dùng gom đoạn khi "Chụp để dịch"; -1 = không rõ. */
+    val blockId: Int = -1,
 )
 
 /** Đoạn đường kẻ (ngang hoặc dọc) tách được từ ảnh bằng morphology. */

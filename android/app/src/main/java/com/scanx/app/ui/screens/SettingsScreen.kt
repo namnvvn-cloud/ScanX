@@ -60,6 +60,9 @@ fun SettingsScreen(
     geminiConfigured: Boolean,
     onGeminiClick: () -> Unit,
     onRecommendApp: () -> Unit,
+    /** Bản 1.0: Google Dịch (Cloud Translation). */
+    googleTranslateConfigured: Boolean = false,
+    onGoogleTranslateClick: () -> Unit = {},
     onComingSoon: () -> Unit,
 ) {
     Scaffold(
@@ -138,6 +141,15 @@ fun SettingsScreen(
                     subtitle = stringResource(if (geminiConfigured) R.string.settings_gemini_on else R.string.settings_gemini_off),
                     locked = false,
                     onClick = onGeminiClick,
+                )
+            }
+            item {
+                SettingsRow(
+                    icon = Icons.Filled.Translate,
+                    title = stringResource(R.string.settings_google_translate),
+                    subtitle = stringResource(if (googleTranslateConfigured) R.string.settings_google_translate_on else R.string.settings_google_translate_off),
+                    locked = false,
+                    onClick = onGoogleTranslateClick,
                 )
             }
             item {
