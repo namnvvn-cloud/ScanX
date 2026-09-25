@@ -343,8 +343,13 @@ private fun FilterToolPanel(
 
 // ------------------------------------------------------------------------------- Cắt và xoay
 
-private enum class CropStage { ROTATE, CROP }
-
+/**
+ * Bản 1.3: gộp Xoay + Cắt thành 1 MÀN duy nhất, thao tác tức thời — theo đúng kiểu 2 ảnh mẫu anh Nam gửi
+ * (cắt/xoay ngay lúc chụp của máy Samsung): khung cắt 4 góc hiện ngay, kèm 3 nút nhanh "Cắt tự động" /
+ * "Không cắt" / "Xoay", cộng thanh trượt "Nghiêng" để chỉnh tinh; chỉ 1 nút "Áp dụng" duy nhất ở cuối
+ * (không còn 2 giai đoạn Xoay → Cắt như bản 0.8, không có "Huỷ" riêng ở đây — nút Đóng (X) trên đầu màn
+ * "Chỉnh sửa trang" đã lo việc huỷ toàn bộ công cụ).
+ */
 @Composable
 private fun CropRotateToolPanel(
     master: Bitmap,
@@ -353,7 +358,6 @@ private fun CropRotateToolPanel(
     onAccept: (Bitmap) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    var stage by remember { mutableStateOf(CropStage.ROTATE) }
     var working by remember { mutableStateOf(master) }
     var workingChanged by remember { mutableStateOf(false) }
     var tiltDeg by remember { mutableStateOf(0f) }
@@ -371,14 +375,19 @@ private fun CropRotateToolPanel(
         tiltDeg = 0f
     }
 
-    // Thử dò khung tài liệu ngay khi vào bước Cắt, để người dùng thường chỉ cần tinh chỉnh nhẹ.
-    LaunchedEffect(stage, working) {
-        if (stage == CropStage.CROP) {
-            isBusy = true
-            val detected = withContext(Dispatchers.Default) { PageCropRotate.autoDetectQuad(working) }
-            quad = detected ?: PageCropRotate.fullFrameQuad()
-            isBusy = false
-        }
+    // Dò khung tài liệu mỗi khi ảnh đổi (mới vào, vừa xoay 90°, hoặc vừa bake nghiêng) — người dùng
+    // thường chỉ cần tinh chỉnh nhẹ 4 góc, không phải bấm thêm bước nào để "sang" phần cắt.
+    LaunchedEffect(working) {
+        isBusy = true
+        val detected = withContext(Dispatchers.Default) { PageCropRotate.autoDetectQuad(working) }
+        quad = detected ?: PageCropRotate.fullFrameQuad()
+        isBusy = false
+    }
+
+    // Giải phóng ảnh trung gian (xoay 90°/nghiêng đã bake) nếu rời màn mà chưa bấm Áp dụng — kể cả khi
+    // đóng bằng nút X ở đầu màn "Chỉnh sửa trang" (ngoài phạm vi composable này).
+    DisposableEffect(Unit) {
+        onDispose { if (workingChanged && working !== master && !working.isRecycled) working.recycle() }
     }
 
     // Bản 0.9: ảnh chiếm phần trống phía trên (weight 1f, vừa khít theo tỉ lệ), nút điều khiển cố định
@@ -388,89 +397,61 @@ private fun CropRotateToolPanel(
             modifier = Modifier.weight(1f).fillMaxWidth().padding(16.dp),
             contentAlignment = Alignment.Center,
         ) {
-            when {
-                stage == CropStage.ROTATE -> Image(
-                    bitmap = working.asImageBitmap(),
-                    contentDescription = "Xoay trang",
-                    modifier = Modifier.aspectRatio(working.width.toFloat() / working.height.toFloat()),
-                )
-                isBusy -> CircularProgressIndicator(color = Color.White)
-                else -> QuadCropCanvas(bitmap = working, quad = quad, onQuadChange = { quad = it })
+            if (isBusy) {
+                CircularProgressIndicator(color = Color.White)
+            } else {
+                QuadCropCanvas(bitmap = working, quad = quad, onQuadChange = { quad = it })
             }
         }
         Surface(color = Color(0xFF1C1C1E)) {
         Column(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
-        when (stage) {
-            CropStage.ROTATE -> {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    TextButton(onClick = { bakeRotation(PageCropRotate.rotate90(working, -1)) }) {
-                        Text("⟲ Trái 90°", color = Color.White)
+            // 3 nút nhanh — đúng như màn cắt/xoay lúc chụp của Samsung.
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+            ) {
+                TextButton(enabled = !isBusy, onClick = {
+                    scope.launch {
+                        isBusy = true
+                        val detected = withContext(Dispatchers.Default) { PageCropRotate.autoDetectQuad(working) }
+                        quad = detected ?: PageCropRotate.fullFrameQuad()
+                        isBusy = false
                     }
-                    TextButton(onClick = { bakeRotation(PageCropRotate.rotate90(working, 1)) }) {
-                        Text("⟳ Phải 90°", color = Color.White)
-                    }
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("Nghiêng", color = Color.White, style = MaterialTheme.typography.labelMedium)
-                    Slider(
-                        value = tiltDeg,
-                        onValueChange = { tiltDeg = it },
-                        onValueChangeFinished = {
-                            if (abs(tiltDeg) >= 0.05f) bakeRotation(PageCropRotate.rotateFree(working, tiltDeg))
-                        },
-                        valueRange = -15f..15f,
-                        modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
-                    )
-                    Text("${"%.1f".format(tiltDeg)}°", color = Color.White, modifier = Modifier.width(48.dp))
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                    TextButton(onClick = { recycleWorkingIfOwned(); onCancel() }) { Text("Huỷ", color = Color.White) }
-                    Button(onClick = { stage = CropStage.CROP }) { Text("Tiếp theo — Cắt") }
-                }
+                }) { Text("Cắt tự động", color = Color.White) }
+                TextButton(onClick = { quad = PageCropRotate.fullFrameQuad() }) { Text("Không cắt", color = Color.White) }
+                TextButton(onClick = { bakeRotation(PageCropRotate.rotate90(working, 1)) }) { Text("⟳ Xoay", color = Color.White) }
             }
-
-            CropStage.CROP -> {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.Center,
-                ) {
-                    TextButton(onClick = {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Nghiêng", color = Color.White, style = MaterialTheme.typography.labelMedium)
+                Slider(
+                    value = tiltDeg,
+                    onValueChange = { tiltDeg = it },
+                    onValueChangeFinished = {
+                        if (abs(tiltDeg) >= 0.05f) bakeRotation(PageCropRotate.rotateFree(working, tiltDeg))
+                    },
+                    valueRange = -15f..15f,
+                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                )
+                Text("${"%.1f".format(tiltDeg)}°", color = Color.White, modifier = Modifier.width(48.dp))
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalArrangement = Arrangement.Center) {
+                Button(
+                    enabled = !isBusy,
+                    onClick = {
                         scope.launch {
                             isBusy = true
-                            val detected = withContext(Dispatchers.Default) { PageCropRotate.autoDetectQuad(working) }
-                            quad = detected ?: PageCropRotate.fullFrameQuad()
+                            val result = withContext(Dispatchers.Default) { PageCropRotate.cropQuad(working, quad) }
                             isBusy = false
+                            recycleWorkingIfOwned()
+                            onAccept(result)
                         }
-                    }) { Text("Tự động dò lại khung", color = Color.White) }
-                }
-                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                    TextButton(onClick = { stage = CropStage.ROTATE }) { Text("← Quay lại", color = Color.White) }
-                    Row {
-                        TextButton(onClick = { recycleWorkingIfOwned(); onCancel() }) { Text("Huỷ", color = Color.White) }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Button(
-                            enabled = !isBusy,
-                            onClick = {
-                                scope.launch {
-                                    isBusy = true
-                                    val result = withContext(Dispatchers.Default) { PageCropRotate.cropQuad(working, quad) }
-                                    isBusy = false
-                                    recycleWorkingIfOwned()
-                                    onAccept(result)
-                                }
-                            },
-                        ) { Text("Chấp nhận") }
-                    }
-                }
+                    },
+                ) { Text("Áp dụng") }
             }
-        }
         }
         }
     }
@@ -679,18 +660,32 @@ private fun CleanupToolPanel(
         }
 
         Spacer(modifier = Modifier.height(8.dp))
-        AcceptCancelRow(
-            onCancel = onCancel,
-            acceptEnabled = !isBusy,
-            onAccept = {
-                scope.launch {
-                    isBusy = true
-                    val result = withContext(Dispatchers.Default) { PageCleanup.heal(master, strokes) }
-                    isBusy = false
-                    onAccept(result)
-                }
-            },
-        )
+        // Bản 1.3: "Đặt lại" (xoá hết nét vừa vẽ, ở lại công cụ) thay cho "Huỷ" (thoát hẳn công cụ) — đúng
+        // kiểu 2 nút "Đặt lại / Áp dụng" của màn làm sạch vết bẩn lúc chụp trên máy Samsung. Thoát hẳn công
+        // cụ (huỷ toàn bộ) đã có sẵn nút Đóng (X) ở đầu màn "Chỉnh sửa trang".
+        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+            TextButton(
+                enabled = strokes.isNotEmpty() && !isBusy,
+                onClick = {
+                    strokes.clear()
+                    redoStack.clear()
+                    val old = healedPreview
+                    healedPreview = previewBase
+                    if (old !== previewBase && !old.isRecycled) old.recycle()
+                },
+            ) { Text("Đặt lại", color = if (strokes.isNotEmpty()) Color.White else Color.Gray) }
+            Button(
+                enabled = !isBusy,
+                onClick = {
+                    scope.launch {
+                        isBusy = true
+                        val result = withContext(Dispatchers.Default) { PageCleanup.heal(master, strokes) }
+                        isBusy = false
+                        onAccept(result)
+                    }
+                },
+            ) { Text("Áp dụng") }
+        }
         }
         }
     }

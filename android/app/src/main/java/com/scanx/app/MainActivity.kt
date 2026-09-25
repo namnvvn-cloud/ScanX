@@ -212,16 +212,13 @@ class MainActivity : ComponentActivity() {
                         if (granted) screen = target else cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
                     }
 
-                    // Bản 1.2 — QUÉT LIÊN TIẾP bằng bộ quét Google (ML Kit Document Scanner, chế độ FULL): mỗi lượt
-                    // Google trả về (người dùng bấm Xong/Lưu trên màn xem trước) → chép ảnh vào phiên → TỰ MỞ LẠI
-                    // camera Google cho trang kế tiếp. Người dùng bấm X/Back trên camera Google = DỪNG → lưu cả phiên
-                    // thành 1 tài liệu → mở màn chỉnh sửa. Google không cho bỏ màn xem trước sau mỗi trang (API không
-                    // có tuỳ chọn) nên mỗi trang vẫn cần 1 lần bấm xác nhận của Google.
-                    val googleRelaunch = remember { arrayOfNulls<() -> Unit>(1) }
-                    fun finishGoogleSession() {
-                        if (viewModel.googleSessionCount == 0) return
-                        viewModel.finishGoogleSession { id -> if (screen is Screen.Home) screen = Screen.Detail(id) }
-                    }
+                    // Bản 1.3 (quyết định anh Nam): BỎ vòng lặp tự mở lại camera của bản 1.2 — chỉ dùng đúng
+                    // tính năng GỐC của Google: dấu "+" trên màn xem trước để thêm trang, ngay trong 1 lần mở
+                    // camera. Gọi bộ quét Google đúng 1 LẦN mỗi phiên; người dùng tự thêm bao nhiêu trang tuỳ
+                    // ý bằng "+" của Google, bấm Lưu/Xong bên Google mới trả hết kết quả về đây. Không cần nút
+                    // "Hoàn thành" riêng trong ScanX: quét xong tự lưu và mở thẳng màn Chi tiết tài liệu (đã có
+                    // sẵn Bộ lọc/Cắt xoay/Làm sạch + Xuất file). Xem mục 000000 trong tài liệu kiến trúc project
+                    // để biết lý do bỏ và cách khôi phục lại vòng lặp bản 1.2 nếu sau này cần.
                     val googleScanLauncher = rememberLauncherForActivityResult(
                         ActivityResultContracts.StartIntentSenderForResult()
                     ) { result ->
@@ -231,28 +228,18 @@ class MainActivity : ComponentActivity() {
                             null
                         }
                         val uris = scan?.pages?.mapNotNull { it.imageUri }.orEmpty()
-                        if (uris.isEmpty()) {
-                            // X / Back trên camera Google → kết thúc phiên (nếu đã có trang).
-                            finishGoogleSession()
-                        } else {
-                            viewModel.stashGoogleScan(uris) { total ->
-                                Toast.makeText(
-                                    context,
-                                    getString(R.string.scan_google_next_page, total),
-                                    Toast.LENGTH_LONG,
-                                ).show()
-                                googleRelaunch[0]?.invoke() ?: finishGoogleSession()
-                            }
+                        if (uris.isNotEmpty()) {
+                            viewModel.saveGoogleScan(uris) { id -> if (screen is Screen.Home) screen = Screen.Detail(id) }
                         }
                     }
 
                     // Bản 1.1 (quyết định của anh Nam): Scan tự động / Scan thủ công dùng BỘ QUÉT GOOGLE — không
                     // dùng thuật toán bắt khung tự viết. Camera ScanX chỉ còn khi chọn trong Cài đặt quét.
-                    fun launchGoogleScanner(mode: CaptureMode, firstRound: Boolean) {
+                    fun launchGoogleScanner(mode: CaptureMode) {
                         val options = GmsDocumentScannerOptions.Builder()
                             .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
                             .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
-                            .setGalleryImportAllowed(firstRound)
+                            .setGalleryImportAllowed(true)
                             .build()
                         val scanner: GmsDocumentScanner = GmsDocumentScanning.getClient(options)
                         scanner.getStartScanIntent(this@MainActivity)
@@ -260,10 +247,6 @@ class MainActivity : ComponentActivity() {
                                 googleScanLauncher.launch(IntentSenderRequest.Builder(sender).build())
                             }
                             .addOnFailureListener { e ->
-                                if (!firstRound) {
-                                    finishGoogleSession()
-                                    return@addOnFailureListener
-                                }
                                 // Máy không có Google Play services / RAM < 1,7 GB / chưa tải được module → camera ScanX.
                                 Toast.makeText(
                                     context,
@@ -284,9 +267,7 @@ class MainActivity : ComponentActivity() {
                         if (mode == CaptureMode.MANUAL) {
                             Toast.makeText(context, getString(R.string.scan_google_manual_hint), Toast.LENGTH_LONG).show()
                         }
-                        viewModel.startGoogleSession()
-                        googleRelaunch[0] = { launchGoogleScanner(mode, firstRound = false) }
-                        launchGoogleScanner(mode, firstRound = true)
+                        launchGoogleScanner(mode)
                     }
 
                     // Bản 1.0: nút Back của Android quay về màn trước thay vì thoát app (camera quét và
