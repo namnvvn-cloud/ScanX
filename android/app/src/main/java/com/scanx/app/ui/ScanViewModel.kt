@@ -371,6 +371,72 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Bản 1.2 — QUÉT NHIỀU TRANG LIÊN TIẾP bằng bộ quét Google: mỗi lượt quét của Google (1 hoặc nhiều
+     * trang) được chép ngay vào phiên [googleSession] (quyền đọc URI chỉ tạm thời, lượt quét sau Google có
+     * thể dọn file của lượt trước) rồi app mở lại camera Google cho trang kế tiếp. Người dùng bấm X/Back
+     * trên camera Google = dừng → [finishGoogleSession] lưu cả phiên thành 1 tài liệu.
+     */
+    private val googleSession = ArrayList<File>()
+    val googleSessionCount: Int get() = googleSession.size
+
+    fun startGoogleSession() {
+        googleSession.clear()
+    }
+
+    /** Chép ảnh lượt quét vừa xong vào phiên; [onDone] (luồng chính) nhận tổng số trang của phiên. */
+    fun stashGoogleScan(uris: List<Uri>, onDone: (Int) -> Unit) {
+        viewModelScope.launch {
+            val context = getApplication<Application>()
+            val dir = File(context.cacheDir, "gms_scan_session").apply { mkdirs() }
+            val stamp = System.currentTimeMillis()
+            val files = withContext(Dispatchers.IO) {
+                uris.mapIndexedNotNull { i, uri ->
+                    runCatching {
+                        val f = File(dir, "gms_${stamp}_$i.jpg")
+                        val copied = context.contentResolver.openInputStream(uri)?.use { input ->
+                            f.outputStream().use { out -> input.copyTo(out) }
+                        }
+                        if (copied != null && f.length() > 0L) f else null
+                    }.getOrNull()
+                }
+            }
+            if (files.isEmpty() && uris.isNotEmpty()) _errorMessage.value = "Không đọc được ảnh từ bộ quét Google"
+            googleSession.addAll(files)
+            onDone(googleSession.size)
+        }
+    }
+
+    /** Lưu toàn bộ trang của phiên quét Google thành 1 tài liệu (giữ nguyên ảnh Google, OCR lớp chữ nếu bật). */
+    fun finishGoogleSession(onSaved: (String) -> Unit = {}) {
+        val masters = googleSession.toList()
+        googleSession.clear()
+        if (masters.isEmpty()) return
+        viewModelScope.launch {
+            _isProcessing.value = true
+            try {
+                val ocr = if (prefs.autoOcrEnabled) {
+                    withContext(Dispatchers.Default) { recognizeMasters(masters) }
+                } else {
+                    OcrResult("", emptyList())
+                }
+                val meta = withContext(Dispatchers.IO) {
+                    repository.saveDocument(
+                        masters = masters, ocrText = ocr.text, folderId = _currentFolderId.value,
+                        textLayers = ocr.layers, pdfMode = PdfExportMode.COLOR_HQ,
+                        pageFilters = masters.map { PageFilter.ORIGINAL },
+                    )
+                }
+                refresh()
+                onSaved(meta.id)
+            } catch (e: Exception) {
+                _errorMessage.value = "Không lưu được tài liệu: ${e.message}"
+            } finally {
+                _isProcessing.value = false
+            }
+        }
+    }
+
     /** Nhập ảnh có sẵn trong máy (nút mở ảnh / Import Files) thành 1 tài liệu mới (giữ màu), không qua camera. */
     fun importImages(uris: List<Uri>) {
         if (uris.isEmpty()) return

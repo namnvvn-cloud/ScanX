@@ -114,10 +114,11 @@
     <string name="capture_translate">Dịch</string>
     <string name="capture_translate_desc">Soi camera vào chữ là bản dịch tiếng Việt hiện đè trực tiếp như Google Dịch; bấm chụp để dịch online chính xác hơn</string>
     <string name="capture_scan_auto">Scan tự động</string>
-    <string name="capture_scan_auto_desc">Bộ quét Google tự bắt khung và tự chụp — bấm + để thêm trang, Xong để sang chỉnh sửa</string>
+    <string name="capture_scan_auto_desc">Bộ quét Google tự bắt khung, tự chụp — xác nhận trang là camera tự mở lại cho trang tiếp; bấm X để kết thúc</string>
     <string name="scan_google_manual_hint">Bấm nút \"Tự động\" trên camera Google để chuyển sang tự bấm chụp</string>
+    <string name="scan_google_next_page">Đã quét %1$d trang ✓ Đặt trang tiếp theo — bấm X trên camera để kết thúc và chỉnh sửa</string>
     <string name="capture_scan_manual">Scan thủ công</string>
-    <string name="capture_scan_manual_desc">Bộ quét Google, tự bấm chụp (tắt nút \"Tự động\" trên camera) — bấm + để thêm trang</string>
+    <string name="capture_scan_manual_desc">Bộ quét Google, tự bấm chụp (tắt nút \"Tự động\" trên camera) — quét liên tiếp, bấm X để kết thúc</string>
     <string name="settings_google_translate">Google Dịch (Cloud Translation)</string>
     <string name="settings_google_translate_on">Đã cài đặt — dùng cho Chụp để dịch và Dịch tài liệu</string>
     <string name="settings_google_translate_off">Chưa cài đặt API key (đang dùng Gemini / ML Kit)</string>
