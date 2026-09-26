@@ -11,6 +11,7 @@ struct DocumentDetailView: View {
     @State private var newTitle = ""
     @State private var confirmDelete = false
     @State private var isExporting = false
+    @State private var exportLabel = "Đang dựng PDF…"
     @State private var exported: ExportedFile?
     @State private var editRequest: PageEditRequest?
 
@@ -87,6 +88,15 @@ struct DocumentDetailView: View {
                             }
                         }
                     }
+                    Section("Chuyển đổi (chữ + bảng sửa được)") {
+                        ForEach(ConvertFormat.allCases) { format in
+                            Button {
+                                convert(format: format)
+                            } label: {
+                                Label(format.title, systemImage: format.icon)
+                            }
+                        }
+                    }
                 } label: {
                     Image(systemName: "square.and.arrow.up")
                 }
@@ -120,7 +130,7 @@ struct DocumentDetailView: View {
         }
         .overlay {
             if isExporting {
-                ProgressView("Đang dựng PDF…")
+                ProgressView(exportLabel)
                     .padding(24)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
             }
@@ -139,9 +149,24 @@ struct DocumentDetailView: View {
 
 extension DocumentDetailView {
     private func export(mode: PDFMode) {
+        exportLabel = "Đang dựng PDF…"
         isExporting = true
         Task {
             let url = await library.exportPDF(id: documentID, mode: mode)
+            isExporting = false
+            if let url {
+                exported = ExportedFile(url: url)
+            }
+        }
+    }
+}
+
+extension DocumentDetailView {
+    private func convert(format: ConvertFormat) {
+        exportLabel = "Đang chuyển đổi (OCR + dựng bố cục)…"
+        isExporting = true
+        Task {
+            let url = await library.exportConverted(id: documentID, format: format)
             isExporting = false
             if let url {
                 exported = ExportedFile(url: url)

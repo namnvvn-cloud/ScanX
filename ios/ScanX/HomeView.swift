@@ -73,6 +73,17 @@ struct HomeView: View {
             Text("Máy này không có bộ quét tài liệu của Apple (VisionKit), ví dụ khi chạy trên Simulator.")
         }
         .alert(
+            "Lưu ý",
+            isPresented: Binding(
+                get: { library.notice != nil },
+                set: { if !$0 { library.notice = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(library.notice ?? "")
+        }
+        .alert(
             "Lỗi",
             isPresented: Binding(
                 get: { library.errorMessage != nil },

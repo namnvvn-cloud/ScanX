@@ -53,6 +53,22 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
+    @Published var notice: String?
+
+    func exportConverted(id: String, format: ConvertFormat) async -> URL? {
+        let store = self.store
+        do {
+            let result = try await Task.detached(priority: .userInitiated) {
+                try store.exportConverted(id: id, format: format)
+            }.value
+            notice = result.notice
+            return result.url
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
     func commitPageEdit(id: String, pageIndex: Int, edit: PageEdit) async -> Bool {
         let store = self.store
         do {

@@ -24,7 +24,7 @@ enum PageOCR {
         return (try? perform(cgImage: cgImage, languages: nil)) ?? []
     }
 
-    private static func preferredLanguages() -> [String] {
+    static func preferredLanguages() -> [String] {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         let supported = (try? request.supportedRecognitionLanguages()) ?? []
