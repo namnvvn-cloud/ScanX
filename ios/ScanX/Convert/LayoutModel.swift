@@ -53,6 +53,11 @@ struct OcrLine: Hashable {
     var confidence: Double = 1
     var lang: String = ""
     var italic: Bool = false
+    /// 4 góc thật của dòng [x0,y0 trên-trái, x1,y1 trên-phải, x2,y2 dưới-phải, x3,y3 dưới-trái] (pixel) —
+    /// dùng tính góc nghiêng khi vẽ bản dịch đè (Chụp để dịch). nil = không có.
+    var quad: [Double]? = nil
+    /// Số khối chữ của bộ OCR (ML Kit có, Vision không có) — -1 = không rõ.
+    var blockId: Int = -1
 }
 
 struct RuleSegment {

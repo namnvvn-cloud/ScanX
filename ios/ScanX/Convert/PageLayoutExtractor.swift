@@ -49,6 +49,11 @@ enum PageLayoutExtractor {
 
     // MARK: - OCR (Vision) → dòng + từ
 
+    /// OCR Vision → dòng (có TỪ, độ tin cậy, ngôn ngữ, 4 góc thật). Dùng chung cho Chuyển đổi và Chụp để dịch.
+    static func ocrLines(_ image: CGImage) -> [OcrLine] {
+        recognize(image, width: image.width, height: image.height)
+    }
+
     private static func recognize(_ image: CGImage, width: Int, height: Int) -> [OcrLine] {
         let languages = PageOCR.preferredLanguages()
         if let lines = try? performOCR(image, width: width, height: height, languages: languages) {
@@ -95,7 +100,10 @@ enum PageLayoutExtractor {
             if words.isEmpty {
                 words = [OcrWord(text: text, box: lineBox, confidence: confidence, lang: lang)]
             }
-            out.append(OcrLine(text: text, box: lineBox, words: words, confidence: confidence, lang: lang))
+            func px(_ p: CGPoint) -> [Double] { [Double(p.x) * W, (1 - Double(p.y)) * H] }
+            var line = OcrLine(text: text, box: lineBox, words: words, confidence: confidence, lang: lang)
+            line.quad = px(observation.topLeft) + px(observation.topRight) + px(observation.bottomRight) + px(observation.bottomLeft)
+            out.append(line)
         }
         return out
     }

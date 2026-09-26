@@ -10,6 +10,7 @@ struct HomeView: View {
     @State private var path: [DocumentMeta] = []
     @State private var showScanner = false
     @State private var showSettings = false
+    @State private var showPhotoTranslate = false
     @State private var showUnsupported = false
 
     var body: some View {
@@ -126,22 +127,37 @@ struct HomeView: View {
     }
 
     private var scanButton: some View {
-        Button {
-            if VNDocumentCameraViewController.isSupported {
-                showScanner = true
-            } else {
-                showUnsupported = true
+        HStack(spacing: 12) {
+            Button {
+                if VNDocumentCameraViewController.isSupported {
+                    showScanner = true
+                } else {
+                    showUnsupported = true
+                }
+            } label: {
+                Label("Quét tài liệu", systemImage: "camera.viewfinder")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
             }
-        } label: {
-            Label("Quét tài liệu", systemImage: "camera.viewfinder")
-                .font(.headline)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 6)
+            .buttonStyle(.borderedProminent)
+            .disabled(library.isSaving)
+
+            Button {
+                showPhotoTranslate = true
+            } label: {
+                Label("Dịch", systemImage: "character.bubble")
+                    .font(.headline)
+                    .padding(.vertical, 6)
+            }
+            .buttonStyle(.bordered)
+            .accessibilityLabel("Chụp để dịch")
         }
-        .buttonStyle(.borderedProminent)
-        .disabled(library.isSaving)
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
+        .fullScreenCover(isPresented: $showPhotoTranslate) {
+            PhotoTranslateView()
+        }
     }
 }
 

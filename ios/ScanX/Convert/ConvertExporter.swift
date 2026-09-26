@@ -50,17 +50,20 @@ enum ConvertExporter {
     /// Số trang gộp mỗi lần gọi Claude đọc chữ (như BATCH_SIZE bên Android bản 0.7).
     static let cloudBatchSize = 3
 
-    static func buildDoc(title: String, pageURLs: [URL], status: (String) -> Void) -> DocModel {
+    /// Dựng bố cục các trang; trả kèm ảnh nguồn của đúng những trang dựng được (để gửi AI Cloud khớp trang).
+    static func buildDoc(title: String, pageURLs: [URL], status: (String) -> Void) -> (doc: DocModel, sources: [URL]) {
         var pages: [DocPage] = []
+        var sources: [URL] = []
         for (i, url) in pageURLs.enumerated() {
             status("Đang nhận dạng chữ trang \(i + 1)/\(pageURLs.count)…")
             autoreleasepool {
                 if let input = PageLayoutExtractor.extract(url: url) {
                     pages.append(LayoutAnalyzer.analyze(input))
+                    sources.append(url)
                 }
             }
         }
-        return DocModel(title: title, pages: pages)
+        return (DocModel(title: title, pages: pages), sources)
     }
 
     static func run(
@@ -70,7 +73,9 @@ enum ConvertExporter {
         to directory: URL,
         status: @escaping (String) -> Void
     ) async throws -> Result {
-        var doc = buildDoc(title: title, pageURLs: pageURLs, status: status)
+        let built = buildDoc(title: title, pageURLs: pageURLs, status: status)
+        var doc = built.doc
+        let sources = built.sources
         guard !doc.pages.isEmpty else { throw DocumentStoreError.noPages }
         var notices: [String] = []
 
@@ -86,7 +91,7 @@ enum ConvertExporter {
                 let end = min(start + cloudBatchSize, doc.pages.count)
                 status("AI Cloud đang đọc chữ trang \(start + 1)–\(end)/\(doc.pages.count)…")
                 let batch = Array(doc.pages[start..<end])
-                let jpegs = (start..<end).map { cloudJPEG(pageURLs[$0]) }
+                let jpegs = (start..<end).map { cloudJPEG(sources[$0]) }
                 result += try await client.transcribeBatch(pages: batch, jpegs: jpegs)
                 start = end
             }
