@@ -20,19 +20,18 @@ Quyền quản trị do **backend** quyết định (biến `ADMIN_EMAILS` trên
 ```bash
 cd web-admin
 npm install
-cp .env.example .env.local   # điền NEXT_PUBLIC_FIREBASE_API_KEY, NEXT_PUBLIC_FIREBASE_APP_ID
 npm run dev                  # http://localhost:3000
 ```
 
 ## Triển khai lần đầu
 
-### 1. Firebase — tạo Web App (lấy cấu hình, không phải bí mật)
-Firebase Console → project **scanx-app** → ⚙ Project settings → **Your apps → Add app → Web (</>)** → tên `ScanX Web` (không tick Hosting) → copy `apiKey` và `appId`.
+### 1. Firebase Web App — ĐÃ TẠO
+App `ScanX Web` (appId `1:455836379547:web:bc9f199507992a8e0cd93e`) — cấu hình đã ghi sẵn trong `lib/firebase.ts` (không phải bí mật).
 
 ### 2. Vercel
 1. https://vercel.com → đăng nhập bằng GitHub → **Add New → Project** → chọn repo `ScanX`.
 2. **Root Directory**: `web-admin` (Framework tự nhận Next.js).
-3. **Environment Variables**: `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_FIREBASE_API_KEY`, `NEXT_PUBLIC_FIREBASE_APP_ID` (2 biến còn lại đã có mặc định).
+3. **Environment Variables**: không bắt buộc (mọi giá trị đã có mặc định). Chỉ đặt `NEXT_PUBLIC_API_URL` nếu đổi địa chỉ backend.
 4. **Deploy** → nhận tên miền dạng `scanx-xxx.vercel.app`.
 
 ### 3. Firebase — cho phép tên miền đăng nhập
