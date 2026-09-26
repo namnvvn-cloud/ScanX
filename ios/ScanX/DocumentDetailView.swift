@@ -12,6 +12,7 @@ struct DocumentDetailView: View {
     @State private var confirmDelete = false
     @State private var isExporting = false
     @State private var exported: ExportedFile?
+    @State private var editRequest: PageEditRequest?
 
     private var meta: DocumentMeta {
         library.document(id: documentID) ?? fallback
@@ -21,9 +22,17 @@ struct DocumentDetailView: View {
         VStack(spacing: 0) {
             TabView(selection: $currentPage) {
                 ForEach(0..<meta.pageCount, id: \.self) { index in
-                    PageImageView(url: library.store.pageURL(for: documentID, index: index))
-                        .padding(12)
-                        .tag(index)
+                    PageImageView(
+                        url: library.store.pageURL(for: documentID, index: index),
+                        filter: index < meta.filters.count ? meta.filters[index] : nil,
+                        version: meta.modifiedAt.timeIntervalSince1970
+                    )
+                    .padding(12)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        editRequest = PageEditRequest(pageIndex: index, tool: .filter)
+                    }
+                    .tag(index)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
@@ -40,7 +49,29 @@ struct DocumentDetailView: View {
             }
             .font(.footnote)
             .foregroundStyle(.secondary)
-            .padding(.vertical, 8)
+            .padding(.top, 8)
+
+            // Thanh dưới cố định như Android (bản 0.9): Bộ lọc | Cắt xoay | Làm sạch.
+            HStack {
+                ForEach(PageEditTool.allCases) { tool in
+                    Button {
+                        editRequest = PageEditRequest(pageIndex: currentPage, tool: tool)
+                    } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: tool.icon)
+                                .font(.title3)
+                            Text(tool.title)
+                                .font(.caption)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+            }
+            .padding(.vertical, 10)
+            .background(.bar)
+        }
+        .fullScreenCover(item: $editRequest) { request in
+            PageEditView(library: library, documentID: documentID, request: request)
         }
         .navigationTitle(meta.title)
         .navigationBarTitleDisplayMode(.inline)
@@ -121,6 +152,8 @@ extension DocumentDetailView {
 
 private struct PageImageView: View {
     let url: URL
+    let filter: PageFilter?
+    let version: Double
     @State private var image: UIImage?
 
     var body: some View {
@@ -135,10 +168,15 @@ private struct PageImageView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .task(id: url) {
+        .task(id: "\(url.path)#\(filter?.rawValue ?? "-")#\(version)") {
             let target = url
-            image = await Task.detached(priority: .userInitiated) {
-                ImageLoader.downsampled(at: target, maxPixel: 1600)
+            let pageFilter = filter
+            image = await Task.detached(priority: .userInitiated) { () -> UIImage? in
+                guard let base = ImageLoader.downsampled(at: target, maxPixel: 1600) else { return nil }
+                guard let pageFilter, let source = base.cgImage,
+                      let filtered = ScanFilters.process(image: source, filter: pageFilter)
+                else { return base }
+                return UIImage(cgImage: filtered)
             }.value
         }
     }

@@ -26,9 +26,82 @@ enum ScanFilters {
 
     static func process(url: URL, mode: PDFMode) -> CGImage? {
         let maxSide: CGFloat = mode == .b1 ? 1600 : 3000
-        guard let source = ImageLoader.downsampled(at: url, maxPixel: maxSide)?.cgImage,
-              let rgbx = rgbxBuffer(from: source)
-        else { return nil }
+        guard let source = ImageLoader.downsampled(at: url, maxPixel: maxSide)?.cgImage else { return nil }
+        return process(image: source, mode: mode)
+    }
+
+    static func process(url: URL, filter: PageFilter) -> CGImage? {
+        guard let source = ImageLoader.downsampled(at: url, maxPixel: 3000)?.cgImage else { return nil }
+        return process(image: source, filter: filter)
+    }
+
+    /// Bộ lọc riêng trang (tương đương ScanFilters.encodePageOverride bên Android).
+    static func process(image: CGImage, filter: PageFilter) -> CGImage? {
+        switch filter {
+        case .original:
+            return jpegImage(image, quality: 0.88)
+        case .bw:
+            return process(image: image, mode: .a2)
+        case .color:
+            return process(image: image, mode: .b2)
+        case .gray:
+            guard let rgbx = rgbxBuffer(from: image) else { return nil }
+            return jpegImage(grayImage(grayscale(rgbx)), quality: 0.8)
+        case .auto:
+            guard let rgbx = rgbxBuffer(from: image) else { return nil }
+            let normalized = normalizeColor(rgbx, background: estimateBackground(grayscale(rgbx)))
+            // Giống Android: bão hoà màu trung bình > 18 → giữ màu, ngược lại đen trắng chất lượng cao.
+            if meanSaturation(normalized) > 18 {
+                return jpegImage(colorImage(normalized), quality: 0.88)
+            }
+            return process(image: image, mode: .a2)
+        case .shadow:
+            guard let rgbx = rgbxBuffer(from: image) else { return nil }
+            var normalized = normalizeColor(rgbx, background: estimateBackground(grayscale(rgbx)))
+            applyColorContrast(&normalized)
+            return jpegImage(colorImage(normalized), quality: 0.88)
+        }
+    }
+
+    static func meanSaturation(_ image: RGBX) -> Double {
+        var total = 0.0
+        var count = 0
+        let pixelCount = image.width * image.height
+        var i = 0
+        while i < pixelCount {
+            let r = Int(image.pixels[i * 4])
+            let g = Int(image.pixels[i * 4 + 1])
+            let b = Int(image.pixels[i * 4 + 2])
+            let hi = max(r, max(g, b))
+            let lo = min(r, min(g, b))
+            if hi > 0 {
+                total += Double(hi - lo) * 255 / Double(hi)
+            }
+            count += 1
+            i += 7
+        }
+        return count > 0 ? total / Double(count) : 0
+    }
+
+    /// Bộ lọc "Bóng": sau khi chia nền (đã xoá bóng đổ), kéo giãn tương phản nhẹ từng kênh màu.
+    static func applyColorContrast(_ image: inout RGBX) {
+        let lo: Float = 15
+        let hi: Float = 245
+        var lut = [UInt8](repeating: 0, count: 256)
+        for v in 0..<256 {
+            let t = min(max((Float(v) - lo) / (hi - lo), 0), 1)
+            lut[v] = UInt8((pow(t, 1.1) * 255).rounded())
+        }
+        let pixelCount = image.width * image.height
+        for i in 0..<pixelCount {
+            image.pixels[i * 4] = lut[Int(image.pixels[i * 4])]
+            image.pixels[i * 4 + 1] = lut[Int(image.pixels[i * 4 + 1])]
+            image.pixels[i * 4 + 2] = lut[Int(image.pixels[i * 4 + 2])]
+        }
+    }
+
+    static func process(image source: CGImage, mode: PDFMode) -> CGImage? {
+        guard let rgbx = rgbxBuffer(from: source) else { return nil }
         let gray = grayscale(rgbx)
         let background = estimateBackground(gray)
         switch mode {

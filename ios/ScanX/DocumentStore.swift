@@ -9,18 +9,36 @@ struct DocumentMeta: Codable, Identifiable, Hashable {
     /// Mã chế độ PDF đang lưu (A1/A2/B1/B2) — nil với tài liệu tạo trước bước 3 (coi như A2).
     var pdfMode: String?
     var hasTextLayer: Bool?
+    /// Bộ lọc riêng từng trang (mã PageFilter), nil = trang theo chế độ PDF.
+    var pageFilters: [String?]?
 
     var mode: PDFMode { PDFMode(rawValue: pdfMode ?? "") ?? .a2 }
+
+    var filters: [PageFilter?] {
+        (0..<pageCount).map { index in
+            guard let codes = pageFilters, index < codes.count, let code = codes[index] else { return nil }
+            return PageFilter(rawValue: code)
+        }
+    }
+}
+
+/// 1 thao tác sửa trang — lưu nguyên khối (ảnh + metadata + PDF) như commitPageEdit bên Android.
+enum PageEdit {
+    case filter(PageFilter?)
+    case geometry(quarterTurns: Int, tilt: Double, quad: Quad)
+    case cleanup([CleanupStroke])
 }
 
 enum DocumentStoreError: LocalizedError {
     case noPages
     case notFound
+    case editFailed
 
     var errorDescription: String? {
         switch self {
         case .noPages: return "Không có trang nào để lưu"
         case .notFound: return "Không tìm thấy tài liệu"
+        case .editFailed: return "Không xử lý được ảnh trang"
         }
     }
 }
@@ -86,7 +104,8 @@ final class DocumentStore: @unchecked Sendable {
             modifiedAt: now,
             pageCount: pageFiles.count,
             pdfMode: mode.rawValue,
-            hasTextLayer: false
+            hasTextLayer: false,
+            pageFilters: nil
         )
         var layers: [[TextLine]]?
         if runOCR {
@@ -98,9 +117,77 @@ final class DocumentStore: @unchecked Sendable {
             meta.hasTextLayer = true
         }
         try saveMeta(meta)
-        try PDFBuilder.build(pageURLs: pageURLs(for: meta), mode: mode, textLayers: layers, to: pdfURL(for: id))
+        try PDFBuilder.build(
+            pageURLs: pageURLs(for: meta), mode: mode, pageFilters: nil, textLayers: layers, to: pdfURL(for: id)
+        )
         makeThumbnail(id: id)
         return meta
+    }
+
+    func commitPageEdit(id: String, pageIndex: Int, edit: PageEdit) throws -> DocumentMeta {
+        guard var meta = load(id: id), pageIndex >= 0, pageIndex < meta.pageCount else {
+            throw DocumentStoreError.notFound
+        }
+        let masterURL = pageURL(for: id, index: pageIndex)
+        var masterChanged = false
+        switch edit {
+        case .filter(let filter):
+            var codes = meta.pageFilters ?? []
+            if codes.count < meta.pageCount {
+                codes += [String?](repeating: nil, count: meta.pageCount - codes.count)
+            }
+            codes[pageIndex] = filter?.rawValue
+            meta.pageFilters = codes
+        case .geometry(let quarterTurns, let tilt, let quad):
+            guard let master = PageTransforms.loadMaster(masterURL),
+                  let output = PageTransforms.render(
+                    PageTransforms.apply(to: master, quarterTurns: quarterTurns, tiltDegrees: tilt, quad: quad)
+                  )
+            else { throw DocumentStoreError.editFailed }
+            try writeMaster(output, to: masterURL)
+            masterChanged = true
+        case .cleanup(let strokes):
+            guard let source = ImageLoader.downsampled(at: masterURL, maxPixel: 20000)?.cgImage,
+                  let rgbx = ScanFilters.rgbxBuffer(from: source),
+                  let output = ScanFilters.colorImage(PageCleanup.heal(rgbx, strokes: strokes))
+            else { throw DocumentStoreError.editFailed }
+            try writeMaster(output, to: masterURL)
+            masterChanged = true
+        }
+
+        var layers = textLayers(for: id)
+        if masterChanged, meta.hasTextLayer == true {
+            // Ảnh đổi hình học → lớp chữ cũ lệch vị trí. Android chỉ xoá lớp chữ của trang;
+            // iOS chạy lại OCR cho đúng trang đó để PDF vẫn tìm kiếm/copy được.
+            var updated = layers ?? []
+            if updated.count < meta.pageCount {
+                updated += [[TextLine]](repeating: [], count: meta.pageCount - updated.count)
+            }
+            updated[pageIndex] = PageOCR.recognize(url: masterURL)
+            try Self.encoder.encode(updated).write(to: textLayersURL(for: id), options: .atomic)
+            layers = updated
+        }
+
+        meta.modifiedAt = Date()
+        try saveMeta(meta)
+        try PDFBuilder.build(
+            pageURLs: pageURLs(for: meta),
+            mode: meta.mode,
+            pageFilters: meta.filters,
+            textLayers: meta.hasTextLayer == true ? layers : nil,
+            to: pdfURL(for: id)
+        )
+        if masterChanged, pageIndex == 0 {
+            makeThumbnail(id: id)
+        }
+        return meta
+    }
+
+    private func writeMaster(_ image: CGImage, to url: URL) throws {
+        guard let data = UIImage(cgImage: image).jpegData(compressionQuality: 0.92) else {
+            throw DocumentStoreError.editFailed
+        }
+        try data.write(to: url, options: .atomic)
     }
 
     func textLayers(for id: String) -> [[TextLine]]? {
@@ -120,7 +207,15 @@ final class DocumentStore: @unchecked Sendable {
         if fm.fileExists(atPath: output.path) {
             try fm.removeItem(at: output)
         }
-        try PDFBuilder.build(pageURLs: pageURLs(for: meta), mode: mode, textLayers: textLayers(for: id), to: output)
+        // Giống Android: bộ lọc riêng trang chỉ áp khi xuất ĐÚNG chế độ đang lưu của tài liệu;
+        // chọn chế độ khác lúc xuất thì áp chế độ đó cho mọi trang.
+        try PDFBuilder.build(
+            pageURLs: pageURLs(for: meta),
+            mode: mode,
+            pageFilters: mode == meta.mode ? meta.filters : nil,
+            textLayers: textLayers(for: id),
+            to: output
+        )
         return output
     }
 

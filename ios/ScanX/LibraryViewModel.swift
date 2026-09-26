@@ -53,6 +53,20 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
+    func commitPageEdit(id: String, pageIndex: Int, edit: PageEdit) async -> Bool {
+        let store = self.store
+        do {
+            _ = try await Task.detached(priority: .userInitiated) {
+                try store.commitPageEdit(id: id, pageIndex: pageIndex, edit: edit)
+            }.value
+            reload()
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
     func rename(id: String, to title: String) {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }

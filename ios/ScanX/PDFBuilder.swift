@@ -28,12 +28,29 @@ enum PDFBuilder {
         return landscape ? CGSize(width: longSide, height: shortSide) : CGSize(width: shortSide, height: longSide)
     }
 
-    static func build(pageURLs: [URL], mode: PDFMode, textLayers: [[TextLine]]?, to outputURL: URL) throws {
+    /// pageFilters: bộ lọc riêng từng trang (nil = theo `mode`).
+    static func build(
+        pageURLs: [URL],
+        mode: PDFMode,
+        pageFilters: [PageFilter?]?,
+        textLayers: [[TextLine]]?,
+        to outputURL: URL
+    ) throws {
         let renderer = UIGraphicsPDFRenderer(bounds: CGRect(origin: .zero, size: a4))
         try renderer.writePDF(to: outputURL) { context in
             for (index, url) in pageURLs.enumerated() {
                 autoreleasepool {
-                    guard let image = ScanFilters.process(url: url, mode: mode) else { return }
+                    var filter: PageFilter?
+                    if let pageFilters, index < pageFilters.count {
+                        filter = pageFilters[index]
+                    }
+                    let processed: CGImage?
+                    if let filter {
+                        processed = ScanFilters.process(url: url, filter: filter)
+                    } else {
+                        processed = ScanFilters.process(url: url, mode: mode)
+                    }
+                    guard let image = processed else { return }
                     let bounds = CGRect(
                         origin: .zero,
                         size: pageSize(for: CGSize(width: image.width, height: image.height))
