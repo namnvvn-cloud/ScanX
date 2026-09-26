@@ -26,10 +26,10 @@ export class DocumentsService {
     const fileKey = `${userId}/${randomUUID()}.pdf`;
     const mimeType = dto.mimeType || 'application/pdf';
     const { rows } = await this.db.query<DocumentRow>(
-      `insert into documents (user_id, title, page_count, mime_type, file_key)
-       values ($1, $2, $3, $4, $5)
+      `insert into documents (user_id, title, page_count, mime_type, file_key, file_size)
+       values ($1, $2, $3, $4, $5, $6)
        returning *`,
-      [userId, dto.title, dto.pageCount, mimeType, fileKey],
+      [userId, dto.title, dto.pageCount, mimeType, fileKey, dto.fileSize ?? null],
     );
     const doc = rows[0];
     const uploadUrl = await this.r2.getUploadUrl(fileKey, mimeType);

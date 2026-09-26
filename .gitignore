@@ -24,6 +24,10 @@ backend/.env
 web-admin/node_modules/
 web-admin/.next/
 web-admin/.env*.local
+web-admin/*.tsbuildinfo
+web-admin/next-env.d.ts
+web-admin/AGENTS.md
+web-admin/CLAUDE.md
 
 # iOS / Xcode (sinh ra bởi XcodeGen lúc build, không commit)
 ios/*.xcodeproj/

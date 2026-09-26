@@ -1,0 +1,31 @@
+name: Backend & Web build
+
+on:
+  push:
+    paths: ['backend/**', 'web-admin/**', '.github/workflows/web-backend-build.yml']
+  pull_request:
+    paths: ['backend/**', 'web-admin/**']
+  workflow_dispatch:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: backend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: backend/package-lock.json }
+      - run: npm ci
+      - run: npm run build
+
+  web:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: web-admin } }
+    env:
+      NEXT_PUBLIC_API_URL: https://scanx-450n.onrender.com
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: web-admin/package-lock.json }
+      - run: npm ci
+      - run: npm run build

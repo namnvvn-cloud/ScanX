@@ -1,4 +1,4 @@
-# ScanX Backend (Phase 1 — MVP API)
+# ScanX Backend (Phase 1 API + Phase 2 Admin/Billing)
 
 NestJS + PostgreSQL (Supabase) + Cloudflare R2 (lưu file) + Firebase Auth (đăng nhập).
 Không dùng ORM (Prisma) để tránh phải tải binary native lúc build/deploy — dùng thẳng SQL qua `pg`.
@@ -16,6 +16,31 @@ Không dùng ORM (Prisma) để tránh phải tải binary native lúc build/dep
 | DELETE | `/documents/:id` | ✓ | Xoá metadata + xoá file trên R2 |
 
 Mọi request có `Auth: ✓` cần header `Authorization: Bearer <firebase-id-token>` (token lấy từ Firebase Auth SDK bên Android sau khi đăng nhập Google/Email).
+
+### Phase 2 — bán gói Business trên web + Web Admin
+
+| Method | Endpoint | Auth | Mô tả |
+|--------|----------|------|-------|
+| GET    | `/plans` | — | Bảng giá + cổng thanh toán đang bật (`providers.vnpay/momo`) |
+| GET    | `/billing/me` | ✓ | Trạng thái Business + lịch sử đơn của user |
+| POST   | `/payments/checkout` | ✓ | `{planId, provider: vnpay\|momo, returnUrl}` → tạo đơn `SX…` + `payUrl` |
+| GET    | `/payments/vnpay/ipn` | chữ ký VNPay | VNPay server gọi — **khai báo URL này trong trang merchant VNPay** |
+| GET    | `/payments/vnpay/return` | chữ ký VNPay | Web gửi lại query sau khi khách quay về |
+| POST   | `/payments/momo/ipn` | chữ ký MoMo | MoMo server gọi (URL tự gửi kèm mỗi đơn từ `PUBLIC_API_URL`) |
+| GET    | `/payments/momo/return` | chữ ký MoMo | Web gửi lại query sau khi khách quay về |
+| GET    | `/admin/me`, `/admin/stats` | admin | Kiểm tra quyền; số liệu tổng + chuỗi 30 ngày |
+| GET    | `/admin/users?q=&filter=business\|free&page=` | admin | Danh sách user |
+| GET    | `/admin/users/:id` | admin | Chi tiết + tài liệu + đơn hàng |
+| PATCH  | `/admin/users/:id/business` | admin | `{isBusiness, expiresAt}` bật/tắt Business thủ công |
+| GET/DELETE | `/admin/documents/:id[/download]` | admin | Tải / xoá tài liệu của user |
+| GET    | `/admin/orders?status=&q=&page=` | admin | Danh sách đơn |
+| POST   | `/admin/orders/:id/confirm` \| `/cancel` | admin | Xác nhận tay (chuyển khoản / IPN lỡ) hoặc huỷ đơn chờ |
+| GET/PATCH | `/admin/plans[/:id]` | admin | Sửa tên / giá / thời hạn / ẩn-hiện gói |
+
+- **admin** = token Firebase hợp lệ + email đã xác minh + email nằm trong `ADMIN_EMAILS`.
+- Đơn `paid` → kích hoạt/gia hạn Business (cộng dồn nếu còn hạn) trong cùng 1 transaction; IPN và Return có thể tới 2 lần nhưng chỉ tính 1 lần.
+- Migration (`migrations/*.sql`) **tự chạy khi server khởi động** — không cần vào Shell Render chạy tay nữa.
+- Bán qua web, tách khỏi IAP App Store / Google Play.
 
 Backend **không** nhận file upload trực tiếp — chỉ cấp presigned URL, Android tự PUT/GET thẳng với R2 (nhanh hơn, đỡ tải server).
 
@@ -92,5 +117,5 @@ Render vẫn có gói Web Service miễn phí thật (không cần thẻ) tính 
 ## 4. Việc còn lại (chưa làm trong bản này)
 
 - Android: thêm màn hình đăng nhập (Firebase Auth UI) + nút "Sao lưu/Đồng bộ" gọi các endpoint trên — **chưa đụng vào flow local-only hiện tại**, đây là tính năng cộng thêm.
-- Web Admin (Phase 2): dashboard quản lý user/document, duyệt thanh toán Business (VNPay/MoMo) → gọi `UsersService.setBusinessStatus`.
+- ~~Web Admin (Phase 2)~~ → đã làm: xem `web-admin/` và bảng API Phase 2 ở trên. Còn: app Android/iOS gửi `fileSize` khi tạo tài liệu (để thống kê dung lượng chính xác).
 - Giới hạn dung lượng/số trang theo gói Free vs Business (chưa enforce ở backend, mới enforce phía UI Android).

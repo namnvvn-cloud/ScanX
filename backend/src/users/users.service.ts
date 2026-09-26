@@ -12,7 +12,8 @@ export class UsersService {
       `insert into users (firebase_uid, email, display_name)
        values ($1, $2, $3)
        on conflict (firebase_uid)
-       do update set email = excluded.email, display_name = excluded.display_name, updated_at = now()
+       do update set email = excluded.email, display_name = coalesce(excluded.display_name, users.display_name),
+                     last_login_at = now(), updated_at = now()
        returning *`,
       [fbUser.uid, fbUser.email ?? null, fbUser.name ?? null],
     );

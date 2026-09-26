@@ -11,4 +11,10 @@ export class CreateDocumentDto {
   @IsOptional()
   @IsString()
   mimeType?: string;
+
+  /** Dung lượng file (byte) — để Web Admin thống kê dung lượng lưu trữ. */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  fileSize?: number;
 }
