@@ -5,25 +5,16 @@ struct AccountView: View {
     @ObservedObject var auth: AuthViewModel
     @ObservedObject var library: LibraryViewModel
 
-    @Environment(\.dismiss) private var dismiss
-
     var body: some View {
-        NavigationStack {
-            Group {
-                if let email = auth.currentEmail {
-                    signedIn(email: email)
-                } else {
-                    LoginView(viewModel: auth)
-                }
-            }
-            .navigationTitle("Tài khoản")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Xong") { dismiss() }
-                }
+        Group {
+            if let email = auth.currentEmail {
+                signedIn(email: email)
+            } else {
+                LoginView(viewModel: auth)
             }
         }
+        .navigationTitle("Tài khoản & Sao lưu")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private func signedIn(email: String) -> some View {

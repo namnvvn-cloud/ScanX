@@ -2,14 +2,14 @@ import SwiftUI
 import VisionKit
 
 /// Màn chính: danh sách tài liệu + nút Quét. Đăng nhập là TUỲ CHỌN (giống Android) —
-/// vào qua nút tài khoản trên thanh tiêu đề.
+/// vào qua Cài đặt → Tài khoản & Sao lưu đám mây.
 struct HomeView: View {
     @ObservedObject var library: LibraryViewModel
     @ObservedObject var auth: AuthViewModel
 
     @State private var path: [DocumentMeta] = []
     @State private var showScanner = false
-    @State private var showAccount = false
+    @State private var showSettings = false
     @State private var showUnsupported = false
 
     var body: some View {
@@ -25,11 +25,11 @@ struct HomeView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
-                        showAccount = true
+                        showSettings = true
                     } label: {
-                        Image(systemName: auth.currentEmail == nil ? "person.crop.circle" : "person.crop.circle.fill")
+                        Image(systemName: "gearshape")
                     }
-                    .accessibilityLabel("Tài khoản & Sao lưu")
+                    .accessibilityLabel("Cài đặt")
                 }
             }
             .safeAreaInset(edge: .bottom) {
@@ -64,8 +64,8 @@ struct HomeView: View {
             )
             .ignoresSafeArea()
         }
-        .sheet(isPresented: $showAccount) {
-            AccountView(auth: auth, library: library)
+        .sheet(isPresented: $showSettings) {
+            SettingsView(auth: auth, library: library)
         }
         .alert("Thiết bị không hỗ trợ quét", isPresented: $showUnsupported) {
             Button("OK", role: .cancel) {}

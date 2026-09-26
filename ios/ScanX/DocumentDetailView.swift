@@ -10,6 +10,8 @@ struct DocumentDetailView: View {
     @State private var showRename = false
     @State private var newTitle = ""
     @State private var confirmDelete = false
+    @State private var isExporting = false
+    @State private var exported: ExportedFile?
 
     private var meta: DocumentMeta {
         library.document(id: documentID) ?? fallback
@@ -27,18 +29,37 @@ struct DocumentDetailView: View {
             .tabViewStyle(.page(indexDisplayMode: .never))
             .background(Color(.secondarySystemBackground))
 
-            Text("Trang \(currentPage + 1)/\(meta.pageCount)")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .padding(.vertical, 8)
+            HStack(spacing: 8) {
+                Text("Trang \(currentPage + 1)/\(meta.pageCount)")
+                Text("·")
+                Text("PDF \(meta.mode.rawValue)")
+                if meta.hasTextLayer == true {
+                    Text("·")
+                    Label("Có lớp chữ", systemImage: "text.viewfinder")
+                }
+            }
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .padding(.vertical, 8)
         }
         .navigationTitle(meta.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                ShareLink(item: library.store.pdfURL(for: documentID)) {
+                Menu {
+                    Section("Chia sẻ PDF") {
+                        ForEach(PDFMode.allCases) { mode in
+                            Button {
+                                export(mode: mode)
+                            } label: {
+                                Text(mode == meta.mode ? "\(mode.title) (đang lưu)" : mode.title)
+                            }
+                        }
+                    }
+                } label: {
                     Image(systemName: "square.and.arrow.up")
                 }
+                .disabled(isExporting)
                 .accessibilityLabel("Chia sẻ PDF")
             }
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -66,10 +87,33 @@ struct DocumentDetailView: View {
             }
             Button("Huỷ", role: .cancel) {}
         }
+        .overlay {
+            if isExporting {
+                ProgressView("Đang dựng PDF…")
+                    .padding(24)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+            }
+        }
+        .sheet(item: $exported) { file in
+            ActivityView(items: [file.url])
+        }
         .confirmationDialog("Xoá tài liệu này?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Xoá", role: .destructive) {
                 library.delete(id: documentID)
                 dismiss()
+            }
+        }
+    }
+}
+
+extension DocumentDetailView {
+    private func export(mode: PDFMode) {
+        isExporting = true
+        Task {
+            let url = await library.exportPDF(id: documentID, mode: mode)
+            isExporting = false
+            if let url {
+                exported = ExportedFile(url: url)
             }
         }
     }

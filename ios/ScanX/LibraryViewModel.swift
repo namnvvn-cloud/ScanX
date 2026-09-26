@@ -26,12 +26,27 @@ final class LibraryViewModel: ObservableObject {
         defer { isSaving = false }
         let title = Self.defaultTitle()
         let store = self.store
+        let mode = AppSettings.pdfMode
+        let runOCR = AppSettings.ocrEnabled
         do {
             let meta = try await Task.detached(priority: .userInitiated) {
-                try store.create(title: title, pageFiles: pageFiles)
+                try store.create(title: title, pageFiles: pageFiles, mode: mode, runOCR: runOCR)
             }.value
             reload()
             return meta
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// Dựng PDF theo chế độ chọn lúc xuất (chạy nền), trả URL file tạm để chia sẻ.
+    func exportPDF(id: String, mode: PDFMode) async -> URL? {
+        let store = self.store
+        do {
+            return try await Task.detached(priority: .userInitiated) {
+                try store.exportPDF(id: id, mode: mode)
+            }.value
         } catch {
             errorMessage = error.localizedDescription
             return nil

@@ -6,6 +6,11 @@ struct DocumentMeta: Codable, Identifiable, Hashable {
     let createdAt: Date
     var modifiedAt: Date
     var pageCount: Int
+    /// Mã chế độ PDF đang lưu (A1/A2/B1/B2) — nil với tài liệu tạo trước bước 3 (coi như A2).
+    var pdfMode: String?
+    var hasTextLayer: Bool?
+
+    var mode: PDFMode { PDFMode(rawValue: pdfMode ?? "") ?? .a2 }
 }
 
 enum DocumentStoreError: LocalizedError {
@@ -21,9 +26,10 @@ enum DocumentStoreError: LocalizedError {
 }
 
 /// Lưu tài liệu trên máy, cùng cấu trúc với Android (DocumentRepository):
-///   documents/<id>/pages/page_NNN.jpg  (ảnh gốc màu)
+///   documents/<id>/pages/page_NNN.jpg  (ảnh gốc màu — bộ lọc chỉ áp lúc dựng PDF, không phá pixel gốc)
 ///   documents/<id>/meta.json
-///   documents/<id>/document.pdf
+///   documents/<id>/text_layers.json    (lớp chữ OCR, toạ độ chuẩn hoá)
+///   documents/<id>/document.pdf        (PDF theo chế độ lưu)
 ///   documents/<id>/thumbnail.jpg
 final class DocumentStore: @unchecked Sendable {
     static let shared = DocumentStore()
@@ -40,6 +46,7 @@ final class DocumentStore: @unchecked Sendable {
     func directory(for id: String) -> URL { rootURL.appendingPathComponent(id, isDirectory: true) }
     func pagesDirectory(for id: String) -> URL { directory(for: id).appendingPathComponent("pages", isDirectory: true) }
     func metaURL(for id: String) -> URL { directory(for: id).appendingPathComponent("meta.json") }
+    func textLayersURL(for id: String) -> URL { directory(for: id).appendingPathComponent("text_layers.json") }
     func pdfURL(for id: String) -> URL { directory(for: id).appendingPathComponent("document.pdf") }
     func thumbnailURL(for id: String) -> URL { directory(for: id).appendingPathComponent("thumbnail.jpg") }
 
@@ -61,7 +68,7 @@ final class DocumentStore: @unchecked Sendable {
     }
 
     /// pageFiles: ảnh JPEG tạm (đã ghi ra đĩa ngay lúc quét để không giữ ảnh 12 MP trong RAM).
-    func create(title: String, pageFiles: [URL]) throws -> DocumentMeta {
+    func create(title: String, pageFiles: [URL], mode: PDFMode, runOCR: Bool) throws -> DocumentMeta {
         guard !pageFiles.isEmpty else { throw DocumentStoreError.noPages }
         let id = UUID().uuidString
         try fm.createDirectory(at: pagesDirectory(for: id), withIntermediateDirectories: true)
@@ -72,11 +79,49 @@ final class DocumentStore: @unchecked Sendable {
             }
         }
         let now = Date()
-        let meta = DocumentMeta(id: id, title: title, createdAt: now, modifiedAt: now, pageCount: pageFiles.count)
+        var meta = DocumentMeta(
+            id: id,
+            title: title,
+            createdAt: now,
+            modifiedAt: now,
+            pageCount: pageFiles.count,
+            pdfMode: mode.rawValue,
+            hasTextLayer: false
+        )
+        var layers: [[TextLine]]?
+        if runOCR {
+            let recognized = pageURLs(for: meta).map { url in
+                autoreleasepool { PageOCR.recognize(url: url) }
+            }
+            try Self.encoder.encode(recognized).write(to: textLayersURL(for: id), options: .atomic)
+            layers = recognized
+            meta.hasTextLayer = true
+        }
         try saveMeta(meta)
-        try PDFBuilder.build(pageURLs: pageURLs(for: meta), to: pdfURL(for: id))
+        try PDFBuilder.build(pageURLs: pageURLs(for: meta), mode: mode, textLayers: layers, to: pdfURL(for: id))
         makeThumbnail(id: id)
         return meta
+    }
+
+    func textLayers(for id: String) -> [[TextLine]]? {
+        guard let data = try? Data(contentsOf: textLayersURL(for: id)) else { return nil }
+        return try? Self.decoder.decode([[TextLine]].self, from: data)
+    }
+
+    /// Xuất PDF theo chế độ người dùng chọn lúc chia sẻ (giống Android: tên "<tài liệu>_A1.pdf").
+    func exportPDF(id: String, mode: PDFMode) throws -> URL {
+        guard let meta = load(id: id) else { throw DocumentStoreError.notFound }
+        let exportDir = fm.temporaryDirectory.appendingPathComponent("export", isDirectory: true)
+        try fm.createDirectory(at: exportDir, withIntermediateDirectories: true)
+        let safeTitle = meta.title
+            .components(separatedBy: CharacterSet(charactersIn: "/\\:?%*|\"<>"))
+            .joined(separator: "_")
+        let output = exportDir.appendingPathComponent("\(safeTitle)_\(mode.rawValue).pdf")
+        if fm.fileExists(atPath: output.path) {
+            try fm.removeItem(at: output)
+        }
+        try PDFBuilder.build(pageURLs: pageURLs(for: meta), mode: mode, textLayers: textLayers(for: id), to: output)
+        return output
     }
 
     func rename(id: String, to title: String) throws -> DocumentMeta {
