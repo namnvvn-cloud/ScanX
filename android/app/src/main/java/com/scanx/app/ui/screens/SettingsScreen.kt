@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -55,6 +56,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onScanningClick: () -> Unit,
     onAdvancedClick: () -> Unit,
+    onAccountClick: () -> Unit,
     cloudConfigured: Boolean,
     onCloudAiClick: () -> Unit,
     geminiConfigured: Boolean,
@@ -76,6 +78,17 @@ fun SettingsScreen(
         }
     ) { padding ->
         LazyColumn(contentPadding = PaddingValues(bottom = 24.dp), modifier = Modifier.padding(padding)) {
+            item { SectionHeader("Tài khoản") }
+            item {
+                SettingsRow(
+                    icon = Icons.Filled.AccountCircle,
+                    title = "Tài khoản & Sao lưu đám mây",
+                    subtitle = "Đăng nhập (tuỳ chọn) để sao lưu tài liệu lên cloud",
+                    locked = false,
+                    onClick = onAccountClick,
+                )
+            }
+            item { HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp)) }
             item { SectionHeader(stringResource(R.string.settings_section_cloud)) }
             item {
                 SettingsRow(

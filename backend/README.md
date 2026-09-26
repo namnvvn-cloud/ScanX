@@ -37,10 +37,25 @@ Backend **không** nhận file upload trực tiếp — chỉ cấp presigned UR
 6. Miễn phí hoàn toàn: gói Spark (mặc định) không cần thẻ, Email/Password và Google Sign-in miễn phí tới 50.000 người dùng/tháng — không cần nâng gói Blaze (gói Blaze chỉ bắt buộc nếu dùng Phone Authentication bằng SMS, ScanX không dùng).
 7. Bên Android: dùng Firebase Auth SDK để đăng nhập, lấy ID token bằng `FirebaseAuth.getInstance().currentUser.getIdToken(false)`.
 
-### Bước 3 — Cloudflare R2 (lưu file, free tier 10GB)
-1. Vào Cloudflare Dashboard → R2 → Create bucket (ví dụ `scanx-documents`).
-2. R2 → Manage API Tokens → Create API Token → quyền **Object Read & Write**, giới hạn vào bucket vừa tạo.
-3. Điền `R2_ENDPOINT` (dạng `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`), `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` vào `.env`.
+### Bước 3 — Storage lưu file
+
+**Đã đổi từ Cloudflare R2 sang Supabase Storage**: từ 2024 Cloudflare bắt buộc phải gắn thẻ tín dụng (dù free tier $0) mới bật được R2 — không phù hợp nếu chưa có thẻ. Supabase Storage free tier (1GB, đủ dùng giai đoạn đầu) **không cần thẻ**, và dùng chung luôn account Supabase đã tạo ở Bước 1. Code backend không đổi gì (vẫn dùng `@aws-sdk/client-s3`, chỉ đổi biến môi trường) — sau này muốn chuyển sang R2/Backblaze B2 cũng chỉ cần sửa `.env`, không sửa code.
+
+1. Vào lại project Supabase (Bước 1) → menu trái → **Storage** → **New bucket**.
+2. Đặt tên `scanx-documents` → để **Public bucket = OFF** (tài liệu người dùng phải riêng tư) → có thể set **File size limit** và **Allowed MIME types** = `application/pdf` → **Save/Create bucket**.
+3. Vào **Project Settings** (icon bánh răng) → **Storage** → tìm mục **S3 Connection** trên trang đó.
+4. Bấm **New access key** (hoặc "Generate new key pair") → đặt tên bất kỳ → xác nhận.
+5. Copy ngay **Access Key ID** và **Secret Access Key** — Secret chỉ hiện **1 lần**, mất phải tạo lại.
+6. Cũng trên mục **S3 Connection** đó, copy đúng **Endpoint URL** và **Region** hiển thị cho project của mình (region là chuỗi kiểu `ap-southeast-1`/`us-east-1` tuỳ project, **không phải** `auto`).
+7. Điền vào `.env`:
+   ```
+   STORAGE_ENDPOINT="<Endpoint URL copy ở bước 6>"
+   STORAGE_REGION="<Region copy ở bước 6>"
+   STORAGE_BUCKET="scanx-documents"
+   STORAGE_ACCESS_KEY_ID="<Access Key ID>"
+   STORAGE_SECRET_ACCESS_KEY="<Secret Access Key>"
+   ```
+8. Free tier Supabase Storage: 1GB dung lượng, 50MB/file. Khoá S3 này có quyền trên **toàn bộ bucket của project** (không riêng từng bucket) — giữ bí mật, chỉ dùng ở backend, không đưa vào code Android.
 
 ### Bước 4 — Chạy máy local
 ```bash
@@ -63,14 +78,14 @@ curl -i http://localhost:3000/documents
 Render vẫn có gói Web Service miễn phí thật (không cần thẻ) tính đến 2026: 512 MB RAM, tự **ngủ sau 15 phút không có request** (lần gọi tiếp theo chờ ~1 phút để dậy), giới hạn **750 giờ chạy/tháng cho cả workspace** (đủ dùng cho 1 service chạy cả tháng nếu chỉ có mình nó). **Fly.io không còn gói miễn phí** (từ khoảng 2025 đã bắt buộc thẻ tín dụng, tính phí theo giây) — nên dùng Render cho Phase 1, không dùng Fly.io nữa.
 
 1. Push code lên GitHub (đã có sẵn trong repo `ScanX`, thư mục `backend/`).
-2. Vào https://render.com → **+ New → Web Service** → chọn/kết nối repo `ScanX`.
+2. Vào https://render.com → **+ New → Web Service** → chọn repo `ScanX` (Render đã kết nối GitHub từ trước thì bấm luôn vào tên repo trong danh sách).
 3. Điền ngay trong form tạo service (Render gộp hết vào 1 form, không qua nhiều bước như trước):
-   - **Root Directory**: `backend` — Render sẽ tự hiểu mọi lệnh dưới đây (Build/Start Command) là chạy tính từ thư mục `backend/`, không cần gõ `cd backend &&`.
-   - **Build Command**: `npm install && npm run build`
-   - **Start Command**: `npm run start`
-   - **Instance Type**: chọn **Free**.
-   - **Environment Variables**: có sẵn khung nhập key/value ngay trong form này — dán từng biến trong `.env` vào đây (không commit file `.env` thật lên git — đã có trong `.gitignore`).
-4. Bấm **Create Web Service** / **Deploy** → theo dõi tiến trình ở tab **Deploys** của service.
+   - **Root Directory**: gõ `backend`, chọn gợi ý `backend/` hiện ra.
+   - **Build Command**: xoá placeholder `yarn`, gõ `npm install && npm run build`.
+   - **Start Command**: xoá placeholder `yarn start`, gõ `npm run start`.
+   - **Compute**: **QUAN TRỌNG — Render mặc định chọn sẵn gói trả phí $7/tháng (0.5 CPU/512MB), KHÔNG phải Free.** Phải tự bấm chọn dòng **"$0 / month · 0.1 CPU · 512 MB RAM · Free"** trong danh sách, nếu không sẽ bị tính phí ngay khi deploy.
+   - **Environment Variables**: bấm nút **"Add from .env"** (tính năng mới) → dán nguyên nội dung file `.env` (Ctrl+A, Ctrl+C từ file, Ctrl+V vào ô) → Render tự tách thành từng biến, không cần gõ tay từng dòng.
+4. Bấm **Deploy web service** → theo dõi tiến trình ở tab **Deploys** của service.
 5. Sau khi deploy xong, chạy migrate 1 lần: vào tab **Shell** của service trên Render, gõ `npm run db:migrate` (hoặc chạy từ máy local, trỏ `DATABASE_URL` production trong `.env` tạm thời).
 6. Muốn sửa lại Root Directory/env var sau này: **Settings → Build & Deploy** (Root Directory) hoặc **Environment** (biến môi trường) ở sidebar trái của service.
 

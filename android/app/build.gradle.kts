@@ -2,6 +2,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.google.gms.google-services")
 }
 
 android {
@@ -106,6 +107,12 @@ dependencies {
     implementation("com.google.mlkit:translate:17.0.3")
 
     implementation("androidx.core:core-splashscreen:1.0.1")
+
+    // Đăng nhập (tuỳ chọn) để dùng tính năng "Sao lưu lên đám mây" — Email/Password + Google Sign-In.
+    // Gọi thẳng backend bằng HttpURLConnection sẵn có (xem BackendApi.kt), không thêm Retrofit/OkHttp.
+    implementation(platform("com.google.firebase:firebase-bom:33.5.1"))
+    implementation("com.google.firebase:firebase-auth")
+    implementation("com.google.android.gms:play-services-auth:21.2.0")
 
     // Bản 0.9: bộ quét tài liệu của Google (ML Kit Document Scanner — cùng bộ Scanner Pro Android đang
     // dùng): tự chụp, bắt khung, Bộ lọc / Cắt và xoay / Làm sạch (xoá vết bẩn, ngón tay) / xoá bóng.

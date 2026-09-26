@@ -57,8 +57,10 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.scanx.app.data.DocumentMeta
+import com.scanx.app.ui.AuthViewModel
 import com.scanx.app.ui.ScanCameraViewModel
 import com.scanx.app.ui.ScanViewModel
+import com.scanx.app.ui.screens.AccountScreen
 import com.scanx.app.ui.screens.AdvancedSettingsScreen
 import com.scanx.app.convert.TranslationChoice
 import com.scanx.app.ui.screens.CloudSettingsDialog
@@ -79,6 +81,7 @@ private sealed class Screen {
     data object Home : Screen()
     data object Camera : Screen()
     data object Settings : Screen()
+    data object Account : Screen()
     data object ScanningSettings : Screen()
     data object AdvancedSettings : Screen()
     data object Trash : Screen()
@@ -275,7 +278,7 @@ class MainActivity : ComponentActivity() {
                     BackHandler(enabled = screen !is Screen.Home && screen !is Screen.Camera && screen !is Screen.Translate) {
                         when {
                             editingDetailPage != null -> { editingDetailPage = null; editingDetailTool = null }
-                            screen is Screen.ScanningSettings || screen is Screen.AdvancedSettings -> screen = Screen.Settings
+                            screen is Screen.ScanningSettings || screen is Screen.AdvancedSettings || screen is Screen.Account -> screen = Screen.Settings
                             else -> screen = Screen.Home
                         }
                     }
@@ -350,6 +353,7 @@ class MainActivity : ComponentActivity() {
                                 onBack = { screen = Screen.Home },
                                 onScanningClick = { screen = Screen.ScanningSettings },
                                 onAdvancedClick = { screen = Screen.AdvancedSettings },
+                                onAccountClick = { screen = Screen.Account },
                                 cloudConfigured = cloudConfigured,
                                 onCloudAiClick = { showCloudSettings = true },
                                 geminiConfigured = geminiConfigured,
@@ -358,6 +362,16 @@ class MainActivity : ComponentActivity() {
                                 onGoogleTranslateClick = { showGoogleTranslateSettings = true },
                                 onRecommendApp = { shareApp() },
                                 onComingSoon = { showComingSoon() },
+                            )
+                        }
+
+                        is Screen.Account -> {
+                            val authViewModel: AuthViewModel = viewModel()
+                            AccountScreen(
+                                viewModel = authViewModel,
+                                documents = documents,
+                                getPdfFile = { id -> viewModel.getPdfFile(id) },
+                                onBack = { screen = Screen.Settings },
                             )
                         }
 

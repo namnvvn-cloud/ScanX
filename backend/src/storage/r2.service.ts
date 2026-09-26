@@ -8,9 +8,12 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 /**
- * Cloudflare R2 tương thích API S3 — dùng luôn @aws-sdk/client-s3, chỉ đổi endpoint.
+ * Storage tương thích API S3 (mặc định trỏ vào Supabase Storage — free tier, không cần thẻ;
+ * dùng chung account Supabase đã có sẵn cho Postgres). Dùng thẳng @aws-sdk/client-s3, chỉ
+ * cần đổi ENDPOINT/REGION/khoá trong .env là chuyển sang provider S3-compatible khác được
+ * (Cloudflare R2, Backblaze B2...) mà không phải sửa code.
  * Backend KHÔNG proxy file qua chính nó: chỉ cấp presigned URL để Android upload/download
- * thẳng lên/xuống R2, đỡ tải cho server và nhanh hơn cho user.
+ * thẳng lên/xuống storage, đỡ tải cho server và nhanh hơn cho user.
  */
 @Injectable()
 export class R2Service {
@@ -18,13 +21,14 @@ export class R2Service {
   private readonly bucket: string;
 
   constructor() {
-    this.bucket = process.env.R2_BUCKET || '';
+    this.bucket = process.env.STORAGE_BUCKET || '';
     this.client = new S3Client({
-      region: 'auto',
-      endpoint: process.env.R2_ENDPOINT,
+      region: process.env.STORAGE_REGION || 'us-east-1',
+      endpoint: process.env.STORAGE_ENDPOINT,
+      forcePathStyle: true,
       credentials: {
-        accessKeyId: process.env.R2_ACCESS_KEY_ID || '',
-        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || '',
+        accessKeyId: process.env.STORAGE_ACCESS_KEY_ID || '',
+        secretAccessKey: process.env.STORAGE_SECRET_ACCESS_KEY || '',
       },
     });
   }
