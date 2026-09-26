@@ -33,6 +33,35 @@
           ]
         }
       }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:455836379547:android:470fc4880291ccef0cd93e",
+        "android_client_info": {
+          "package_name": "com.scanx.app.debug"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "455836379547-ninn40uifpgo9e6ql8s12qosf7j5h3ub.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBZuh2QLOX1A-gTgXYVjB_w6rdDLbu8STk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "455836379547-ninn40uifpgo9e6ql8s12qosf7j5h3ub.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
     }
   ],
   "configuration_version": "1"
