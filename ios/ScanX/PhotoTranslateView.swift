@@ -7,6 +7,7 @@ struct PhotoTranslateView: View {
     @StateObject private var model = PhotoTranslateModel()
     @Environment(\.dismiss) private var dismiss
     @State private var showCamera = false
+    @State private var showLive = false
     @State private var pickerItem: PhotosPickerItem?
     @State private var showOriginal = false
     @State private var showText = false
@@ -26,6 +27,12 @@ struct PhotoTranslateView: View {
                         }
                     }
                 }
+        }
+        .fullScreenCover(isPresented: $showLive) {
+            LiveTranslateScreen { image in
+                showLive = false
+                model.process(image)
+            }
         }
         .fullScreenCover(isPresented: $showCamera) {
             CameraPicker { image in
@@ -89,12 +96,21 @@ struct PhotoTranslateView: View {
             Spacer()
             VStack(spacing: 12) {
                 Button {
+                    showLive = true
+                } label: {
+                    Label("Dịch trực tiếp (soi camera)", systemImage: "camera.viewfinder")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
+
+                Button {
                     showCamera = true
                 } label: {
                     Label("Chụp ảnh", systemImage: "camera")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.bordered)
                 .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
 
                 PhotosPicker(selection: $pickerItem, matching: .images) {
