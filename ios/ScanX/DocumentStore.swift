@@ -219,12 +219,12 @@ final class DocumentStore: @unchecked Sendable {
         return output
     }
 
-    /// Chuyển đổi bố cục sang Word/Excel/PowerPoint/TXT (chữ + bảng thật, không dán ảnh).
-    func exportConverted(id: String, format: ConvertFormat) throws -> ConvertExporter.Result {
+    /// Nguồn cho chuyển đổi/dịch: tiêu đề + ảnh gốc các trang + thư mục xuất tạm.
+    func conversionSource(id: String) throws -> (title: String, pages: [URL], directory: URL) {
         guard let meta = load(id: id) else { throw DocumentStoreError.notFound }
         let exportDir = fm.temporaryDirectory.appendingPathComponent("export", isDirectory: true)
         try fm.createDirectory(at: exportDir, withIntermediateDirectories: true)
-        return try ConvertExporter.export(title: meta.title, pageURLs: pageURLs(for: meta), format: format, to: exportDir)
+        return (meta.title, pageURLs(for: meta), exportDir)
     }
 
     func rename(id: String, to title: String) throws -> DocumentMeta {

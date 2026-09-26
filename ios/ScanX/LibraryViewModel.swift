@@ -55,11 +55,25 @@ final class LibraryViewModel: ObservableObject {
 
     @Published var notice: String?
 
-    func exportConverted(id: String, format: ConvertFormat) async -> URL? {
+    @Published var progressText: String?
+
+    /// Chuyển đổi Word/Excel/PowerPoint/TXT, tuỳ chọn dịch + AI Cloud — chạy nền, báo tiến độ.
+    func runOfficeJob(id: String, job: ConvertExporter.Job) async -> URL? {
         let store = self.store
+        progressText = "Đang chuẩn bị…"
+        defer { progressText = nil }
         do {
-            let result = try await Task.detached(priority: .userInitiated) {
-                try store.exportConverted(id: id, format: format)
+            let source = try store.conversionSource(id: id)
+            let result = try await Task.detached(priority: .userInitiated) { [weak self] in
+                try await ConvertExporter.run(
+                    title: source.title,
+                    pageURLs: source.pages,
+                    job: job,
+                    to: source.directory,
+                    status: { text in
+                        Task { @MainActor in self?.progressText = text }
+                    }
+                )
             }.value
             notice = result.notice
             return result.url

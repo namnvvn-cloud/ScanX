@@ -8,6 +8,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage(AppSettings.pdfModeKey) private var pdfMode: String = PDFMode.a2.rawValue
     @AppStorage(AppSettings.ocrEnabledKey) private var ocrEnabled = true
+    @State private var refresh = false
 
     var body: some View {
         NavigationStack {
@@ -49,18 +50,56 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    NavigationLink {
+                        APIKeySettingsView(service: .claude)
+                    } label: {
+                        keyRow("AI Cloud (Claude)", SecretStore.claudeKey, icon: "sparkles")
+                    }
+                    NavigationLink {
+                        APIKeySettingsView(service: .gemini)
+                    } label: {
+                        keyRow("Gemini (dịch miễn phí)", SecretStore.geminiKey, icon: "wand.and.stars")
+                    }
+                    NavigationLink {
+                        APIKeySettingsView(service: .google)
+                    } label: {
+                        keyRow("Google Dịch (Cloud Translation)", SecretStore.googleTranslateKey, icon: "globe")
+                    }
+                } header: {
+                    Text("Dịch vụ đám mây")
+                } footer: {
+                    Text("API key của chính anh, lưu trong Keychain; tài liệu gửi thẳng tới nhà cung cấp, không qua máy chủ ScanX.")
+                }
+
+                Section {
                     Toggle("Nhận dạng chữ (OCR) khi lưu", isOn: $ocrEnabled)
                 } footer: {
                     Text("Thêm lớp chữ ẩn vào PDF để tìm kiếm và copy được chữ (Việt, Anh, Hàn, Nhật, Trung). Chạy trên máy, không cần mạng.")
                 }
             }
             .navigationTitle("Cài đặt")
+            .onAppear { refresh.toggle() }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Xong") { dismiss() }
                 }
             }
+        }
+    }
+
+    private func keyRow(_ title: String, _ account: String, icon: String) -> some View {
+        let configured = SecretStore.has(account)
+        return Label {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                Text(configured ? "Đã có API key" : "Chưa cấu hình")
+                    .font(.caption)
+                    .foregroundStyle(configured ? Color.green : Color.secondary)
+                    .id(refresh)
+            }
+        } icon: {
+            Image(systemName: icon)
         }
     }
 }

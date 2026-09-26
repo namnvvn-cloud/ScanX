@@ -14,6 +14,7 @@ struct DocumentDetailView: View {
     @State private var exportLabel = "Đang dựng PDF…"
     @State private var exported: ExportedFile?
     @State private var editRequest: PageEditRequest?
+    @State private var showOfficeSheet = false
 
     private var meta: DocumentMeta {
         library.document(id: documentID) ?? fallback
@@ -88,13 +89,11 @@ struct DocumentDetailView: View {
                             }
                         }
                     }
-                    Section("Chuyển đổi (chữ + bảng sửa được)") {
-                        ForEach(ConvertFormat.allCases) { format in
-                            Button {
-                                convert(format: format)
-                            } label: {
-                                Label(format.title, systemImage: format.icon)
-                            }
+                    Section("Chữ + bảng sửa được") {
+                        Button {
+                            showOfficeSheet = true
+                        } label: {
+                            Label("Chuyển đổi / Dịch sang tiếng Việt…", systemImage: "character.book.closed")
                         }
                     }
                 } label: {
@@ -135,6 +134,14 @@ struct DocumentDetailView: View {
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
             }
         }
+        .sheet(isPresented: $showOfficeSheet) {
+            OfficeExportSheet(library: library, documentID: documentID) { url in
+                // Mở bảng chia sẻ sau khi sheet chuyển đổi đã đóng hẳn.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    exported = ExportedFile(url: url)
+                }
+            }
+        }
         .sheet(item: $exported) { file in
             ActivityView(items: [file.url])
         }
@@ -153,20 +160,6 @@ extension DocumentDetailView {
         isExporting = true
         Task {
             let url = await library.exportPDF(id: documentID, mode: mode)
-            isExporting = false
-            if let url {
-                exported = ExportedFile(url: url)
-            }
-        }
-    }
-}
-
-extension DocumentDetailView {
-    private func convert(format: ConvertFormat) {
-        exportLabel = "Đang chuyển đổi (OCR + dựng bố cục)…"
-        isExporting = true
-        Task {
-            let url = await library.exportConverted(id: documentID, format: format)
             isExporting = false
             if let url {
                 exported = ExportedFile(url: url)
