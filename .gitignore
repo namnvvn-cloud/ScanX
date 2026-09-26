@@ -24,3 +24,9 @@ backend/.env
 web-admin/node_modules/
 web-admin/.next/
 web-admin/.env*.local
+
+# iOS / Xcode (sinh ra bởi XcodeGen lúc build, không commit)
+ios/*.xcodeproj/
+ios/.build/
+ios/DerivedData/
+ios/*.xcworkspace/

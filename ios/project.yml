@@ -1,0 +1,56 @@
+name: ScanX
+options:
+  bundleIdPrefix: com.scanx
+  deploymentTarget:
+    iOS: "16.0"
+
+packages:
+  Firebase:
+    url: https://github.com/firebase/firebase-ios-sdk
+    from: 10.29.0
+  GoogleSignIn:
+    url: https://github.com/google/GoogleSignIn-iOS
+    from: 7.1.0
+
+targets:
+  ScanX:
+    type: application
+    platform: iOS
+    sources:
+      - path: ScanX
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.scanx.app
+        PRODUCT_NAME: ScanX
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
+    info:
+      path: ScanX/Info.plist
+      properties:
+        CFBundleDisplayName: ScanX
+        UILaunchScreen: {}
+        ITSAppUsesNonExemptEncryption: false
+        NSCameraUsageDescription: "ScanX cần quyền truy cập camera để quét tài liệu."
+        NSPhotoLibraryUsageDescription: "ScanX cần quyền truy cập thư viện ảnh để chọn ảnh quét."
+        CFBundleURLTypes:
+          - CFBundleURLSchemes:
+              - com.googleusercontent.apps.455836379547-oodm90fnagkf4u1gkf18s5uo0g6i93g3
+    dependencies:
+      - package: Firebase
+        product: FirebaseAuth
+      - package: Firebase
+        product: FirebaseCore
+      - package: GoogleSignIn
+        product: GoogleSignIn
+
+schemes:
+  ScanX:
+    build:
+      targets:
+        ScanX: all
+    run:
+      config: Debug
+    archive:
+      config: Release
