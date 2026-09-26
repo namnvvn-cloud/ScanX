@@ -1,19 +1,10 @@
 import SwiftUI
 
 struct ContentView: View {
-    @StateObject private var authViewModel = AuthViewModel()
+    @StateObject private var library = LibraryViewModel()
+    @StateObject private var auth = AuthViewModel()
 
     var body: some View {
-        Group {
-            if authViewModel.currentEmail != nil {
-                HomeView(viewModel: authViewModel)
-            } else {
-                LoginView(viewModel: authViewModel)
-            }
-        }
+        HomeView(library: library, auth: auth)
     }
-}
-
-#Preview {
-    ContentView()
 }

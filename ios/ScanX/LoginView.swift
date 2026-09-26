@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 
+/// Form đăng nhập (Email/Password + Google), hiển thị trong AccountView.
 struct LoginView: View {
     @ObservedObject var viewModel: AuthViewModel
 
@@ -8,65 +9,64 @@ struct LoginView: View {
     @State private var password = ""
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    Text("Đăng nhập ScanX")
-                        .font(.title2.bold())
-                        .padding(.top, 24)
+        ScrollView {
+            VStack(spacing: 16) {
+                Text("Đăng nhập (tuỳ chọn) để sao lưu tài liệu lên đám mây. Không đăng nhập vẫn dùng đầy đủ tính năng quét.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 16)
 
-                    Text("Đăng nhập (tuỳ chọn) để sao lưu tài liệu lên đám mây.")
+                TextField("Email", text: $email)
+                    .textFieldStyle(.roundedBorder)
+                    .keyboardType(.emailAddress)
+                    .textContentType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+
+                SecureField("Mật khẩu", text: $password)
+                    .textFieldStyle(.roundedBorder)
+                    .textContentType(.password)
+
+                if let error = viewModel.errorMessage {
+                    Text(error)
+                        .foregroundStyle(.red)
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
+                }
 
-                    TextField("Email", text: $email)
-                        .textFieldStyle(.roundedBorder)
-                        .keyboardType(.emailAddress)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-
-                    SecureField("Mật khẩu", text: $password)
-                        .textFieldStyle(.roundedBorder)
-
-                    if let error = viewModel.errorMessage {
-                        Text(error)
-                            .foregroundStyle(.red)
-                            .font(.footnote)
+                HStack(spacing: 12) {
+                    Button {
+                        viewModel.signIn(email: email, password: password)
+                    } label: {
+                        Text("Đăng nhập").frame(maxWidth: .infinity)
                     }
-
-                    HStack(spacing: 12) {
-                        Button("Đăng nhập") {
-                            viewModel.signIn(email: email, password: password)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(viewModel.isBusy || email.isEmpty || password.isEmpty)
-
-                        Button("Đăng ký") {
-                            viewModel.register(email: email, password: password)
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(viewModel.isBusy || email.isEmpty || password.isEmpty)
-                    }
+                    .buttonStyle(.borderedProminent)
 
                     Button {
-                        if let top = Self.topViewController() {
-                            viewModel.signInWithGoogle(presenting: top)
-                        }
+                        viewModel.register(email: email, password: password)
                     } label: {
-                        Text("Đăng nhập bằng Google")
-                            .frame(maxWidth: .infinity)
+                        Text("Đăng ký").frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
-                    .disabled(viewModel.isBusy)
-
-                    if viewModel.isBusy {
-                        ProgressView()
-                    }
                 }
-                .padding(.horizontal, 24)
+                .disabled(viewModel.isBusy || email.isEmpty || password.isEmpty)
+
+                Button {
+                    if let top = Self.topViewController() {
+                        viewModel.signInWithGoogle(presenting: top)
+                    }
+                } label: {
+                    Label("Đăng nhập bằng Google", systemImage: "g.circle")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(viewModel.isBusy)
+
+                if viewModel.isBusy {
+                    ProgressView()
+                }
             }
-            .navigationTitle("ScanX")
+            .padding(.horizontal, 24)
         }
     }
 
@@ -81,8 +81,4 @@ struct LoginView: View {
         }
         return top
     }
-}
-
-#Preview {
-    LoginView(viewModel: AuthViewModel())
 }
