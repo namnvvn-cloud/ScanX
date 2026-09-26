@@ -31,9 +31,19 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn('Không tìm thấy thư mục migrations — bỏ qua tự migrate');
       return;
     }
-    for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()) {
-      await this.pool.query(fs.readFileSync(path.join(dir, file), 'utf8'));
-      this.logger.log(`Migrate ${file} ✔`);
+    try {
+      for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()) {
+        await this.pool.query(fs.readFileSync(path.join(dir, file), 'utf8'));
+        this.logger.log(`Migrate ${file} ✔`);
+      }
+    } catch (err: any) {
+      if (err?.code === 'ENETUNREACH' || err?.code === 'ENOTFOUND') {
+        this.logger.error(
+          'Không kết nối được Postgres. Nếu dùng Supabase trên Render: host db.<ref>.supabase.co chỉ có IPv6, ' +
+            'Render không ra được IPv6 → đổi DATABASE_URL sang "Session pooler" (aws-0-<region>.pooler.supabase.com:5432, user postgres.<ref>).',
+        );
+      }
+      throw err;
     }
   }
 
