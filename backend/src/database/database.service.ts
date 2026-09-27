@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 import * as fs from 'fs';
 import * as path from 'path';
+import { describeDatabaseUrl, normalizeDatabaseUrl } from './database-url';
 
 /**
  * Wrapper mỏng quanh pg.Pool — dùng SQL thuần thay vì ORM để tránh phụ thuộc binary native
@@ -17,8 +18,10 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(DatabaseService.name);
 
   constructor() {
+    const url = normalizeDatabaseUrl(process.env.DATABASE_URL);
+    this.logger.log(`Postgres: ${describeDatabaseUrl(url)}`);
     this.pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
+      connectionString: url,
       ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false },
     });
   }
