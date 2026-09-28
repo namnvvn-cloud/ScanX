@@ -190,6 +190,31 @@ final class DocumentStore: @unchecked Sendable {
         try data.write(to: url, options: .atomic)
     }
 
+    /// Toàn bộ chữ OCR của tài liệu (nối các dòng) — dùng cho Bộ lọc thông minh, báo cáo chi phí.
+    func ocrText(for id: String) -> String {
+        guard let layers = textLayers(for: id) else { return "" }
+        return layers.map { page in page.map(\.text).joined(separator: "\n") }.joined(separator: "\n")
+    }
+
+    /// Thay ảnh 1 trang nhưng GIỮ lớp chữ (hình học không đổi — vd. chèn chữ ký), dựng lại PDF.
+    func stampPage(id: String, pageIndex: Int, image: CGImage) throws -> DocumentMeta {
+        guard var meta = load(id: id), pageIndex >= 0, pageIndex < meta.pageCount else {
+            throw DocumentStoreError.notFound
+        }
+        try writeMaster(image, to: pageURL(for: id, index: pageIndex))
+        meta.modifiedAt = Date()
+        try saveMeta(meta)
+        try PDFBuilder.build(
+            pageURLs: pageURLs(for: meta),
+            mode: meta.mode,
+            pageFilters: meta.filters,
+            textLayers: meta.hasTextLayer == true ? textLayers(for: id) : nil,
+            to: pdfURL(for: id)
+        )
+        if pageIndex == 0 { makeThumbnail(id: id) }
+        return meta
+    }
+
     func textLayers(for id: String) -> [[TextLine]]? {
         guard let data = try? Data(contentsOf: textLayersURL(for: id)) else { return nil }
         return try? Self.decoder.decode([[TextLine]].self, from: data)

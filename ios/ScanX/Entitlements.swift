@@ -7,6 +7,15 @@ import SwiftUI
 enum BusinessFeature: String, CaseIterable, Identifiable {
     case exportImageText = "export_image_text"
     case cameraTranslate = "camera_translate"
+    case textScan = "text_scan"
+    case bookScan = "book_scan"
+    case qrScan = "qr_scan"
+    case signatures = "signatures"
+    case emailTemplates = "email_templates"
+    case cloudFolders = "cloud_folders"
+    case expenseReport = "expense_report"
+    case workflows = "workflows"
+    case autoUpload = "auto_upload"
     case officeExport = "office_export"
     case docTranslate = "doc_translate"
     case aiHandwriting = "ai_handwriting"
@@ -18,6 +27,15 @@ enum BusinessFeature: String, CaseIterable, Identifiable {
         switch self {
         case .exportImageText: return "Xuất ảnh JPG, văn bản TXT"
         case .cameraTranslate: return "Chụp để dịch, dịch trực tiếp khi soi camera"
+        case .textScan: return "Quét lấy văn bản (chụp → chữ, sao chép / chia sẻ)"
+        case .bookScan: return "Quét sách: tự tách 2 trang mở"
+        case .qrScan: return "Quét mã QR / mã vạch"
+        case .signatures: return "Chữ ký: vẽ và chèn chữ ký vào tài liệu"
+        case .emailTemplates: return "Gửi email theo mẫu (tiêu đề, nội dung, người nhận)"
+        case .cloudFolders: return "Lưu vào thư mục đám mây (iCloud Drive, Google Drive, OneDrive, Dropbox…)"
+        case .expenseReport: return "Báo cáo chi phí từ hoá đơn, biên lai (xuất CSV/Excel)"
+        case .workflows: return "Quy trình tự động sau khi quét"
+        case .autoUpload: return "Tự động tải tài liệu mới lên đám mây"
         case .officeExport: return "Chuyển sang Word / Excel / PowerPoint giữ bố cục"
         case .docTranslate: return "Dịch cả tài liệu sang tiếng Việt (bản dịch / song ngữ)"
         case .aiHandwriting: return "AI Cloud đọc chữ viết tay, bản chụp khó"
@@ -27,15 +45,16 @@ enum BusinessFeature: String, CaseIterable, Identifiable {
 
     var fallbackTrials: Int {
         switch self {
-        case .officeExport, .docTranslate: return 3
-        case .aiHandwriting, .cloudBackup, .exportImageText, .cameraTranslate: return 0
+        case .officeExport, .docTranslate, .expenseReport, .workflows: return 3
+        default: return 0
         }
     }
 
     /** "free" | "business" | "off" khi chưa tải được chính sách từ server. */
     var fallbackAccess: String {
         switch self {
-        case .exportImageText, .cameraTranslate: return "free"
+        case .exportImageText, .cameraTranslate, .textScan, .bookScan, .qrScan, .signatures, .emailTemplates, .cloudFolders:
+            return "free"
         default: return "business"
         }
     }

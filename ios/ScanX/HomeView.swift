@@ -1,6 +1,9 @@
 import SwiftUI
 import VisionKit
 
+/// Mục đích của 1 lần mở bộ quét: tài liệu / lấy văn bản / sách 2 trang.
+enum ScanPurpose { case document, text, book }
+
 /// Màn chính: danh sách tài liệu + nút Quét. Đăng nhập là TUỲ CHỌN (giống Android) —
 /// vào qua Cài đặt → Tài khoản & Sao lưu đám mây.
 struct HomeView: View {
@@ -13,6 +16,14 @@ struct HomeView: View {
     @State private var showPhotoTranslate = false
     @State private var showUnsupported = false
     @State private var paywall: BusinessFeature?
+    @State private var scanPurpose: ScanPurpose = .document
+    @State private var textResult: TextResult?
+    @State private var qrValue: QRValue?
+    @State private var showQRScanner = false
+    @State private var showExpense = false
+    @State private var showSupport = false
+    @State private var showQRHistory = false
+    @ObservedObject var ent: EntitlementsManager = .shared
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -20,11 +31,39 @@ struct HomeView: View {
                 if library.documents.isEmpty {
                     emptyState
                 } else {
-                    documentList
+                    VStack(spacing: 0) {
+                        smartFilterRow
+                        if library.visibleDocuments.isEmpty {
+                            Text("Không có tài liệu khớp bộ lọc «\(library.smartFilter.label)».")
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else {
+                            documentList
+                        }
+                    }
                 }
             }
             .navigationTitle("ScanX")
+            .navigationDestination(isPresented: $showExpense) { ExpenseReportView(library: library) }
+            .navigationDestination(isPresented: $showSupport) { SupportView(library: library) }
+            .navigationDestination(isPresented: $showQRHistory) { QRHistoryView(onScan: { startQR() }) }
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Menu {
+                        Button {
+                            use(.expenseReport) { showExpense = true }
+                        } label: { Label("Báo cáo chi phí", systemImage: "list.bullet.rectangle.portrait") }
+                        Button {
+                            showQRHistory = true
+                        } label: { Label("Lịch sử quét mã", systemImage: "qrcode") }
+                        Button {
+                            showSupport = true
+                        } label: { Label(ent.businessActive ? "Hỗ trợ ưu tiên" : "Hỗ trợ", systemImage: "questionmark.bubble") }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .accessibilityLabel("Thêm")
+                }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
                         showSettings = true
@@ -52,9 +91,17 @@ struct HomeView: View {
             DocumentScannerView(
                 onFinish: { files in
                     showScanner = false
+                    let purpose = scanPurpose
+                    scanPurpose = .document
                     Task {
-                        if let meta = await library.saveScan(pageFiles: files) {
-                            path.append(meta)
+                        switch purpose {
+                        case .text:
+                            let text = await library.recognizeText(files: files)
+                            textResult = TextResult(text: text)
+                        case .book:
+                            if let meta = await library.saveBookScan(files: files) { path.append(meta) }
+                        case .document:
+                            if let meta = await library.saveScan(pageFiles: files) { path.append(meta) }
                         }
                     }
                 },
@@ -68,6 +115,29 @@ struct HomeView: View {
         }
         .sheet(isPresented: $showSettings) {
             SettingsView(auth: auth, library: library)
+        }
+        .sheet(item: $textResult) { r in TextResultView(text: r.text) }
+        .sheet(item: $qrValue) { v in
+            QRResultView(value: v.value, onHistory: { qrValue = nil; showQRHistory = true })
+        }
+        .sheet(item: $library.pendingEmail) { p in EmailComposer(payload: p) }
+        .fullScreenCover(isPresented: $showQRScanner) {
+            QRScannerView(
+                onFound: { value in
+                    ToolsStore.shared.addQR(value)
+                    showQRScanner = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { qrValue = QRValue(value: value) }
+                },
+                onCancel: { showQRScanner = false }
+            )
+            .ignoresSafeArea()
+        }
+        .overlay {
+            if let text = library.progressText, !library.isSaving {
+                ProgressView(text)
+                    .padding(24)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+            }
         }
         .alert("Thiết bị không hỗ trợ quét", isPresented: $showUnsupported) {
             Button("OK", role: .cancel) {}
@@ -113,28 +183,84 @@ struct HomeView: View {
 
     private var documentList: some View {
         List {
-            ForEach(library.documents) { meta in
+            let docs = library.visibleDocuments
+            ForEach(docs) { meta in
                 NavigationLink(value: meta) {
                     DocumentRow(meta: meta, thumbnailURL: library.store.thumbnailURL(for: meta.id))
                 }
             }
             .onDelete { offsets in
-                for index in offsets {
-                    library.delete(id: library.documents[index].id)
-                }
+                let ids = offsets.map { docs[$0].id }
+                ids.forEach { library.delete(id: $0) }
             }
         }
         .listStyle(.plain)
     }
 
+    /// Bộ lọc thông minh: 7 ngày qua / Có văn bản / Hoá đơn / Nhiều trang.
+    private var smartFilterRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(SmartFilter.allCases) { f in
+                    let selected = library.smartFilter == f
+                    Button {
+                        library.smartFilter = selected ? .all : f
+                    } label: {
+                        HStack(spacing: 4) {
+                            if selected && f != .all { Image(systemName: "checkmark") }
+                            Text(f.label)
+                        }
+                        .font(.subheadline)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(selected ? Color.accentColor.opacity(0.15) : Color(.secondarySystemBackground), in: Capsule())
+                        .overlay(Capsule().stroke(selected ? Color.accentColor : Color.clear))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+        }
+    }
+
+    /// Chạy [action] nếu được phép (Business / còn lượt thử), ngược lại mở màn Business.
+    private func use(_ feature: BusinessFeature, _ action: () -> Void) {
+        switch ent.tryUse([feature]) {
+        case .locked(let f): paywall = f
+        case .business, .trial: action()
+        }
+    }
+
+    private func startScan(_ purpose: ScanPurpose) {
+        guard VNDocumentCameraViewController.isSupported else {
+            showUnsupported = true
+            return
+        }
+        scanPurpose = purpose
+        showScanner = true
+    }
+
+    private func startQR() {
+        use(.qrScan) { showQRScanner = true }
+    }
+
     private var scanButton: some View {
         HStack(spacing: 12) {
+            Menu {
+                Button { use(.textScan) { startScan(.text) } } label: { Label("Văn bản", systemImage: "text.viewfinder") }
+                Button { use(.bookScan) { startScan(.book) } } label: { Label("Sách (tách 2 trang)", systemImage: "book") }
+                Button { startQR() } label: { Label("Mã QR", systemImage: "qrcode.viewfinder") }
+            } label: {
+                Image(systemName: "square.grid.2x2")
+                    .font(.headline)
+                    .padding(.vertical, 6)
+            }
+            .buttonStyle(.bordered)
+            .accessibilityLabel("Công cụ")
+
             Button {
-                if VNDocumentCameraViewController.isSupported {
-                    showScanner = true
-                } else {
-                    showUnsupported = true
-                }
+                startScan(.document)
             } label: {
                 Label("Quét tài liệu", systemImage: "camera.viewfinder")
                     .font(.headline)

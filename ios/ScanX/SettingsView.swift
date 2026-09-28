@@ -4,6 +4,8 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var auth: AuthViewModel
     @ObservedObject var library: LibraryViewModel
+    @ObservedObject var tools: ToolsStore = .shared
+    @ObservedObject var ent: EntitlementsManager = .shared
 
     @Environment(\.dismiss) private var dismiss
     @AppStorage(AppSettings.pdfModeKey) private var pdfMode: String = PDFMode.a2.rawValue
@@ -27,6 +29,64 @@ struct SettingsView: View {
                         } icon: {
                             Image(systemName: "person.crop.circle")
                         }
+                    }
+                }
+
+                Section {
+                    NavigationLink {
+                        CloudFoldersView()
+                    } label: {
+                        Label {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Thêm dịch vụ")
+                                Text(tools.cloudFolders.isEmpty
+                                     ? "Kết nối iCloud Drive, Google Drive, OneDrive, Dropbox…"
+                                     : "Đã kết nối \(tools.cloudFolders.count) thư mục")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        } icon: { Image(systemName: "externaldrive.badge.icloud") }
+                    }
+                    NavigationLink {
+                        CloudFoldersView()
+                    } label: {
+                        Label {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Tự động tải lên")
+                                Text(tools.autoUploadEnabled ? "Đang bật" : "Tự động tải tài liệu mới lên đám mây")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        } icon: { Image(systemName: "icloud.and.arrow.up") }
+                    }
+                } header: {
+                    Text("Dịch vụ lưu trữ")
+                }
+
+                Section("Công cụ") {
+                    NavigationLink { EmailTemplateView() } label: {
+                        Label("Mẫu email", systemImage: "envelope")
+                    }
+                    NavigationLink { WorkflowsView() } label: {
+                        Label(tools.workflows.isEmpty ? "Quy trình tự động" : "Quy trình tự động (\(tools.workflows.count))", systemImage: "arrow.triangle.branch")
+                    }
+                    NavigationLink { SignaturesView() } label: {
+                        Label(tools.signatures.isEmpty ? "Chữ ký" : "Chữ ký (\(tools.signatures.count))", systemImage: "signature")
+                    }
+                    NavigationLink { AppIconView() } label: {
+                        Label("Biểu tượng ứng dụng", systemImage: "app.badge")
+                    }
+                }
+
+                Section {
+                    NavigationLink {
+                        AccountView(auth: auth, library: library)
+                    } label: {
+                        Label {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(ent.businessActive ? "ScanX Business đang hoạt động" : "Nâng cấp lên ScanX Business")
+                                Text(ent.businessActive ? "Xem hạn gói, tính năng đã mở khoá" : "Mở khoá Word/Excel, dịch tài liệu, quy trình, báo cáo chi phí…")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        } icon: { Image(systemName: "crown") }
                     }
                 }
 

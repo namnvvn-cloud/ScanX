@@ -15,6 +15,11 @@ struct DocumentDetailView: View {
     @State private var exported: ExportedFile?
     @State private var editRequest: PageEditRequest?
     @State private var showOfficeSheet = false
+    @State private var email: EmailPayload?
+    @State private var signPage: SignRequest?
+    @State private var paywall: BusinessFeature?
+    @ObservedObject var tools: ToolsStore = .shared
+    @ObservedObject var ent: EntitlementsManager = .shared
 
     private var meta: DocumentMeta {
         library.document(id: documentID) ?? fallback
@@ -110,6 +115,32 @@ struct DocumentDetailView: View {
                     } label: {
                         Label("Đổi tên", systemImage: "pencil")
                     }
+                    Button {
+                        use(.signatures) { signPage = SignRequest(pageIndex: currentPage) }
+                    } label: {
+                        Label("Ký tên (trang \(currentPage + 1))", systemImage: "signature")
+                    }
+                    Button {
+                        use(.emailTemplates) { email = library.makeEmail(id: documentID) }
+                    } label: {
+                        Label("Gửi email", systemImage: "envelope")
+                    }
+                    Button {
+                        use(.cloudFolders) { Task { await library.saveToCloudFolder(id: documentID) } }
+                    } label: {
+                        Label("Lưu vào thư mục đám mây", systemImage: "externaldrive.badge.icloud")
+                    }
+                    if !tools.workflows.isEmpty {
+                        Menu {
+                            ForEach(tools.workflows) { wf in
+                                Button("\(wf.name) · \(wf.stepCount) bước") {
+                                    use(.workflows) { Task { await library.runWorkflow(id: documentID, workflow: wf) } }
+                                }
+                            }
+                        } label: {
+                            Label("Chạy quy trình", systemImage: "arrow.triangle.branch")
+                        }
+                    }
                     Button(role: .destructive) {
                         confirmDelete = true
                     } label: {
@@ -145,6 +176,18 @@ struct DocumentDetailView: View {
         .sheet(item: $exported) { file in
             ActivityView(items: [file.url])
         }
+        .sheet(item: $email) { p in EmailComposer(payload: p) }
+        .sheet(item: $paywall) { f in BusinessPaywallView(feature: f) }
+        .fullScreenCover(item: $signPage) { req in
+            SignPlacementView(library: library, documentID: documentID, pageIndex: req.pageIndex)
+        }
+        .overlay {
+            if let text = library.progressText {
+                ProgressView(text)
+                    .padding(24)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+            }
+        }
         .confirmationDialog("Xoá tài liệu này?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Xoá", role: .destructive) {
                 library.delete(id: documentID)
@@ -154,7 +197,20 @@ struct DocumentDetailView: View {
     }
 }
 
+struct SignRequest: Identifiable {
+    let id = UUID()
+    let pageIndex: Int
+}
+
 extension DocumentDetailView {
+    /// Chạy [action] nếu được phép (Business / còn lượt thử), ngược lại mở màn Business.
+    private func use(_ feature: BusinessFeature, _ action: () -> Void) {
+        switch ent.tryUse([feature]) {
+        case .locked(let f): paywall = f
+        case .business, .trial: action()
+        }
+    }
+
     private func export(mode: PDFMode) {
         exportLabel = "Đang dựng PDF…"
         isExporting = true
