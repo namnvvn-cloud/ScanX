@@ -28,6 +28,9 @@ class BackendApi(private val idToken: String) {
     /** POST /auth/login — xác thực token, backend tự tạo hồ sơ user trong DB nếu là lần đầu. */
     fun login(): JSONObject = JSONObject(call("POST", "/auth/login", null))
 
+    /** GET /users/me — hồ sơ + `business_active` + `entitlements` (gói Business, tính năng, lượt dùng thử). */
+    fun me(): JSONObject = JSONObject(call("GET", "/users/me", null))
+
     /** GET /documents — danh sách tài liệu đã sao lưu của user trên cloud. */
     fun listDocuments(): List<JSONObject> {
         val arr = JSONArray(call("GET", "/documents", null))

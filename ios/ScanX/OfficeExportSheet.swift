@@ -14,6 +14,9 @@ struct OfficeExportSheet: View {
     @State private var bilingual = false
     @State private var useCloud = false
     @State private var running = false
+    @State private var paywall: BusinessFeature?
+    @State private var trialNote: String?
+    @ObservedObject private var ent = EntitlementsManager.shared
 
     private var cloudAvailable: Bool { SecretStore.has(SecretStore.claudeKey) }
 
@@ -56,12 +59,26 @@ struct OfficeExportSheet: View {
                          : "Nhập API key Claude trong Cài đặt → AI Cloud để bật.")
                 }
 
+                if !ent.businessActive {
+                    Section {
+                        Label("Word/Excel/PowerPoint, Dịch tài liệu, AI Cloud là tính năng Business", systemImage: "crown")
+                            .font(.footnote)
+                    } footer: {
+                        Text("Còn \(ent.trialsRemaining(.officeExport)) lượt thử chuyển Office, \(ent.trialsRemaining(.docTranslate)) lượt thử dịch. Xuất TXT luôn miễn phí.")
+                    }
+                }
+
                 if running {
                     Section {
                         HStack(spacing: 12) {
                             ProgressView()
                             Text(library.progressText ?? "Đang xử lý…")
                                 .font(.footnote)
+                        }
+                        if let trialNote {
+                            Text(trialNote)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -79,10 +96,29 @@ struct OfficeExportSheet: View {
                 }
             }
             .interactiveDismissDisabled(running)
+            .sheet(item: $paywall) { f in BusinessPaywallView(feature: f) }
         }
     }
 
+    /// Tính năng Business mà thao tác này cần (xuất TXT không dịch, không AI = miễn phí).
+    private var neededFeatures: [BusinessFeature] {
+        var needed: [BusinessFeature] = []
+        if format != .txt { needed.append(.officeExport) }
+        if translate { needed.append(.docTranslate) }
+        if useCloud && cloudAvailable { needed.append(.aiHandwriting) }
+        return needed
+    }
+
     private func start() {
+        switch ent.tryUse(neededFeatures) {
+        case .locked(let feature):
+            paywall = feature
+            return
+        case .trial(let remaining):
+            trialNote = "Dùng thử tính năng Business — còn \(remaining) lượt"
+        case .business:
+            trialNote = nil
+        }
         running = true
         let job = ConvertExporter.Job(
             format: format,

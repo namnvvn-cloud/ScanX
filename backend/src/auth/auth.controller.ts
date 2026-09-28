@@ -3,6 +3,7 @@ import { FirebaseAuthGuard } from './firebase-auth.guard';
 import { CurrentUser } from './current-user.decorator';
 import { FirebaseUser } from './firebase-auth.guard';
 import { UsersService } from '../users/users.service';
+import { withEntitlements } from '../users/entitlements';
 
 @Controller('auth')
 export class AuthController {
@@ -18,6 +19,6 @@ export class AuthController {
   @Post('login')
   async login(@CurrentUser() user: FirebaseUser) {
     const profile = await this.usersService.upsertFromFirebase(user);
-    return { user: profile };
+    return { user: withEntitlements(profile) };
   }
 }

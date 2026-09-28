@@ -4,6 +4,8 @@ import SwiftUI
 struct AccountView: View {
     @ObservedObject var auth: AuthViewModel
     @ObservedObject var library: LibraryViewModel
+    @ObservedObject private var ent = EntitlementsManager.shared
+    @State private var paywall: BusinessFeature?
 
     var body: some View {
         Group {
@@ -13,6 +15,7 @@ struct AccountView: View {
                 LoginView(viewModel: auth)
             }
         }
+        .sheet(item: $paywall) { f in BusinessPaywallView(feature: f) }
         .navigationTitle("Tài khoản & Sao lưu")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -25,11 +28,19 @@ struct AccountView: View {
                     .foregroundStyle(.secondary)
             }
 
+            PlanSection()
+
             Section {
                 Button {
-                    auth.backupAll(documents: library.backupItems())
+                    // Sao lưu = tính năng Business (backend cũng chặn POST /documents khi chưa có gói).
+                    if ent.has(.cloudBackup) {
+                        auth.backupAll(documents: library.backupItems())
+                    } else {
+                        paywall = .cloudBackup
+                    }
                 } label: {
-                    Label("Sao lưu lên đám mây", systemImage: "icloud.and.arrow.up")
+                    Label(ent.has(.cloudBackup) ? "Sao lưu lên đám mây" : "Sao lưu lên đám mây (Business)",
+                          systemImage: ent.has(.cloudBackup) ? "icloud.and.arrow.up" : "lock")
                 }
                 .disabled(auth.isBusy || library.documents.isEmpty)
 

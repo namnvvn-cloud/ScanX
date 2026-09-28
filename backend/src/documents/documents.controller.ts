@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  ForbiddenException,
   NotFoundException,
   Param,
   Patch,
@@ -13,6 +14,7 @@ import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { FirebaseUser } from '../auth/firebase-auth.guard';
 import { UsersService } from '../users/users.service';
+import { businessActive } from '../users/entitlements';
 import { DocumentsService } from './documents.service';
 import { CreateDocumentDto } from './dto/create-document.dto';
 import { UpdateDocumentDto } from './dto/update-document.dto';
@@ -44,10 +46,15 @@ export class DocumentsController {
     return this.documentsService.list(userId);
   }
 
+  /** Sao lưu đám mây = tính năng Business (tốn dung lượng lưu trữ) → chặn ở server, không chỉ ở app. */
   @Post()
   async create(@CurrentUser() fbUser: FirebaseUser, @Body() dto: CreateDocumentDto) {
-    const userId = await this.resolveUserId(fbUser.uid);
-    return this.documentsService.createWithUploadUrl(userId, dto);
+    const user = await this.usersService.findByFirebaseUid(fbUser.uid);
+    if (!user) throw new NotFoundException('Chưa có hồ sơ user — gọi POST /auth/login trước');
+    if (!businessActive(user)) {
+      throw new ForbiddenException('Sao lưu đám mây là tính năng Business — tài khoản chưa có gói Business còn hạn');
+    }
+    return this.documentsService.createWithUploadUrl(user.id, dto);
   }
 
   @Get(':id')

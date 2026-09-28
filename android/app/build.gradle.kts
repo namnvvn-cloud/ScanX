@@ -20,6 +20,12 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
+        // Trang mua gói Business trên web (Vercel). Nút "Xem gói Business" chỉ hiện ở bản cài APK trực tiếp;
+        // bản release lên Google Play TẮT (chính sách Play Payments cấm dẫn người dùng ra thanh toán ngoài
+        // cho nội dung số — muốn bán trong app bản Play phải dùng Google Play Billing).
+        buildConfigField("String", "WEB_PRICING_URL", "\"https://scan-x-bice.vercel.app/pricing\"")
+        buildConfigField("boolean", "SHOW_WEB_PURCHASE", "true")
+
         // OpenCV AAR đóng gói native lib cho mọi ABI (~110MB). Giới hạn còn 2 ABI phổ biến nhất
         // trên điện thoại thật (bỏ x86/x86_64 chỉ dùng cho emulator) để giảm đáng kể kích thước APK.
         ndk {
@@ -46,6 +52,7 @@ android {
             applicationIdSuffix = ".debug"
         }
         release {
+            buildConfigField("boolean", "SHOW_WEB_PURCHASE", "false")
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }

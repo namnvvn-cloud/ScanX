@@ -4,6 +4,7 @@ import { FirebaseAuthGuard, FirebaseUser } from '../auth/firebase-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { UsersService } from '../users/users.service';
 import { BillingService } from './billing.service';
+import { FEATURE_KEYS, FEATURE_LABELS, FREE_TRIALS, withEntitlements } from '../users/entitlements';
 
 class CheckoutDto {
   @IsString()
@@ -35,14 +36,19 @@ export class BillingController {
 
   @Get('plans')
   async plans() {
-    return { plans: await this.billing.listPlans(), providers: this.billing.providers() };
+    return {
+      plans: await this.billing.listPlans(),
+      providers: this.billing.providers(),
+      // Bảng so sánh Free vs Business trên web — cùng nguồn với app (GET /users/me).
+      businessFeatures: FEATURE_KEYS.map((key) => ({ key, label: FEATURE_LABELS[key], freeTrials: FREE_TRIALS[key] })),
+    };
   }
 
   @UseGuards(FirebaseAuthGuard)
   @Get('billing/me')
   async me(@CurrentUser() fbUser: FirebaseUser) {
     const user = await this.users.upsertFromFirebase(fbUser);
-    return { user, orders: await this.billing.listOrdersForUser(user.id) };
+    return { user: withEntitlements(user), orders: await this.billing.listOrdersForUser(user.id) };
   }
 
   @UseGuards(FirebaseAuthGuard)

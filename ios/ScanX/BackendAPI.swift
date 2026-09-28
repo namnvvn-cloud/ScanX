@@ -38,6 +38,12 @@ final class BackendAPI {
         return parseObject(data)
     }
 
+    /// GET /users/me — hồ sơ + business_active + entitlements (tính năng Business, lượt dùng thử).
+    func me() async throws -> [String: Any] {
+        let data = try await send(method: "GET", path: "/users/me", body: nil)
+        return parseObject(data)
+    }
+
     func listDocuments() async throws -> [[String: Any]] {
         let data = try await send(method: "GET", path: "/documents", body: nil)
         return (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] ?? []

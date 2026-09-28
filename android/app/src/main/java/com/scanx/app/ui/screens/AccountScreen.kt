@@ -35,7 +35,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.common.api.ApiException
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import com.scanx.app.data.BusinessFeature
 import com.scanx.app.data.DocumentMeta
+import com.scanx.app.data.Entitlements
 import com.scanx.app.ui.AuthViewModel
 import java.io.File
 
@@ -50,6 +54,14 @@ fun AccountScreen(
     documents: List<DocumentMeta>,
     getPdfFile: (String) -> File,
     onBack: () -> Unit,
+    entitlements: Entitlements,
+    entitlementsRefreshing: Boolean,
+    entitlementsError: String?,
+    trialsRemaining: (BusinessFeature) -> Int,
+    onRefreshEntitlements: () -> Unit,
+    onOpenPricing: (() -> Unit)?,
+    /** Sao lưu là tính năng Business — chưa có gói thì mở hộp thoại Business thay vì sao lưu. */
+    onBackupLocked: () -> Unit,
 ) {
     val email by viewModel.currentEmail.collectAsStateWithLifecycle()
     val busy by viewModel.busy.collectAsStateWithLifecycle()
@@ -78,7 +90,7 @@ fun AccountScreen(
             )
         }
     ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding).padding(20.dp)) {
+        Column(modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(20.dp)) {
             if (email == null) {
                 LoginForm(
                     busy = busy,
@@ -90,14 +102,28 @@ fun AccountScreen(
                 )
             } else {
                 Text("Đã đăng nhập: $email", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(12.dp))
+                PlanCard(
+                    entitlements = entitlements,
+                    refreshing = entitlementsRefreshing,
+                    refreshError = entitlementsError,
+                    trialsRemaining = trialsRemaining,
+                    onRefresh = onRefreshEntitlements,
+                    onOpenPricing = onOpenPricing,
+                )
+                Spacer(Modifier.height(20.dp))
                 Text("Tài liệu trên máy: ${documents.size}", style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.height(20.dp))
                 Button(
-                    onClick = { viewModel.backupAll(documents, getPdfFile) },
+                    onClick = {
+                        if (entitlements.hasFeature(BusinessFeature.CLOUD_BACKUP)) viewModel.backupAll(documents, getPdfFile)
+                        else onBackupLocked()
+                    },
                     enabled = !busy && documents.isNotEmpty(),
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text("Sao lưu lên đám mây") }
+                ) {
+                    Text(if (entitlements.hasFeature(BusinessFeature.CLOUD_BACKUP)) "Sao lưu lên đám mây" else "Sao lưu lên đám mây (Business)")
+                }
                 Text(
                     "Sao lưu 1 chiều: đẩy tài liệu từ máy lên cloud, không tự động, không đồng bộ 2 chiều. " +
                         "Server free tier có thể chờ ~1 phút nếu lâu chưa dùng.",
@@ -117,7 +143,7 @@ fun AccountScreen(
                     Spacer(Modifier.height(12.dp))
                     Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 }
-                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.height(28.dp))
                 OutlinedButton(onClick = { viewModel.signOut() }, modifier = Modifier.fillMaxWidth()) {
                     Text("Đăng xuất")
                 }
@@ -139,7 +165,7 @@ private fun LoginForm(
     var password by remember { mutableStateOf("") }
 
     Text(
-        "Đăng nhập để sao lưu tài liệu lên đám mây (tuỳ chọn — không đăng nhập vẫn dùng app bình thường).",
+        "Đăng nhập để dùng gói Business (chuyển Office, dịch tài liệu, AI Cloud, sao lưu đám mây) — tuỳ chọn, không đăng nhập vẫn quét/OCR/xuất PDF bình thường.",
         style = MaterialTheme.typography.bodyMedium,
     )
     Spacer(Modifier.height(16.dp))

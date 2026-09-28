@@ -47,4 +47,4 @@ Trong trang merchant sandbox VNPay: IPN URL = `https://scanx-450n.onrender.com/p
 - **VNPay**: thẻ test NCB trong email đăng ký sandbox (số thẻ, tên, ngày phát hành, OTP).
 - **MoMo**: trang test hiện QR/thẻ ATM test theo tài liệu developers.momo.vn.
 - Sau khi trả tiền: `/billing/result` báo thành công → `/account` và `/admin/users` hiện Business + hạn.
-- Lưu ý: app Android/iOS **chưa đọc** trạng thái Business từ backend (chưa khoá/mở tính năng theo gói) — cần làm thêm ở bước sau.
+- App Android/iOS đọc gói qua `GET /users/me` (tự làm mới khi mở lại app, hoặc bấm «Làm mới» ở Cài đặt → Tài khoản) → tính năng Business mở khoá ngay.

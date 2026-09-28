@@ -58,6 +58,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.scanx.app.data.DocumentMeta
 import com.scanx.app.ui.AuthViewModel
+import com.scanx.app.ui.EntitlementsViewModel
+import com.scanx.app.ui.FeatureAccess
+import com.scanx.app.data.BusinessFeature
+import com.scanx.app.ui.screens.BusinessPaywallDialog
 import com.scanx.app.ui.ScanCameraViewModel
 import com.scanx.app.ui.ScanViewModel
 import com.scanx.app.ui.screens.AccountScreen
@@ -101,6 +105,17 @@ private class CreateDocumentContract : ActivityResultContract<Pair<String, Strin
 class MainActivity : ComponentActivity() {
 
     private val viewModel: ScanViewModel by viewModels()
+    private val entitlementsViewModel: EntitlementsViewModel by viewModels()
+
+    override fun onResume() {
+        super.onResume()
+        // Người dùng có thể vừa mua gói Business trên web rồi quay lại app → cập nhật trạng thái gói.
+        entitlementsViewModel.refreshIfStale()
+    }
+
+    private fun openPricing() {
+        runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(BuildConfig.WEB_PRICING_URL))) }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -144,6 +159,40 @@ class MainActivity : ComponentActivity() {
                     var editingDetailTool by remember { mutableStateOf<PageEditTool?>(null) }
                     LaunchedEffect(screen) { editingDetailPage = null; editingDetailTool = null }
                     val prefs = remember { com.scanx.app.data.AppPreferences(context) }
+
+                    // Mục 5+6 Phase 2: tính năng Business (xuất Office, dịch tài liệu, AI Cloud, sao lưu).
+                    val entitlements by entitlementsViewModel.state.collectAsStateWithLifecycle()
+                    val entitlementsRefreshing by entitlementsViewModel.refreshing.collectAsStateWithLifecycle()
+                    val entitlementsError by entitlementsViewModel.refreshError.collectAsStateWithLifecycle()
+                    var paywallFeature by remember { mutableStateOf<BusinessFeature?>(null) }
+                    val pricingAction: (() -> Unit)? = if (BuildConfig.SHOW_WEB_PURCHASE) ({ openPricing() }) else null
+
+                    /** Chạy [action] nếu được phép (Business hoặc còn lượt thử), ngược lại mở hộp thoại Business. */
+                    fun withFeatures(features: List<BusinessFeature>, action: () -> Unit) {
+                        when (val access = entitlementsViewModel.tryUse(features)) {
+                            is FeatureAccess.Business -> action()
+                            is FeatureAccess.Trial -> {
+                                Toast.makeText(
+                                    context,
+                                    "Dùng thử tính năng Business — còn ${access.remainingAfter} lượt",
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                                action()
+                            }
+                            is FeatureAccess.Locked -> paywallFeature = access.feature
+                        }
+                    }
+
+                    fun officeFeatures(format: ExportFormat, useCloud: Boolean): List<BusinessFeature> = buildList {
+                        val office = format == ExportFormat.DOCX || format == ExportFormat.XLSX || format == ExportFormat.PPTX
+                        if (office) add(BusinessFeature.OFFICE_EXPORT)
+                        if (office && useCloud && cloudConfigured) add(BusinessFeature.AI_HANDWRITING)
+                    }
+
+                    fun translateFeatures(cloudOcr: Boolean): List<BusinessFeature> = buildList {
+                        add(BusinessFeature.DOC_TRANSLATE)
+                        if (cloudOcr && cloudConfigured) add(BusinessFeature.AI_HANDWRITING)
+                    }
 
                     LaunchedEffect(errorMessage) {
                         errorMessage?.let {
@@ -372,6 +421,13 @@ class MainActivity : ComponentActivity() {
                                 documents = documents,
                                 getPdfFile = { id -> viewModel.getPdfFile(id) },
                                 onBack = { screen = Screen.Settings },
+                                entitlements = entitlements,
+                                entitlementsRefreshing = entitlementsRefreshing,
+                                entitlementsError = entitlementsError,
+                                trialsRemaining = entitlementsViewModel::trialsRemaining,
+                                onRefreshEntitlements = { entitlementsViewModel.refresh() },
+                                onOpenPricing = pricingAction,
+                                onBackupLocked = { paywallFeature = BusinessFeature.CLOUD_BACKUP },
                             )
                         }
 
@@ -430,14 +486,18 @@ class MainActivity : ComponentActivity() {
                                     pdfFile = viewModel.getPdfFile(document.id),
                                     onBack = { screen = Screen.Home },
                                     onExport = { format, mode, useCloud, share ->
-                                        viewModel.exportDocument(document.id, format, mode, useCloud) { files -> deliver(files, format, share) }
+                                        withFeatures(officeFeatures(format, useCloud)) {
+                                            viewModel.exportDocument(document.id, format, mode, useCloud) { files -> deliver(files, format, share) }
+                                        }
                                     },
                                     cloudConfigured = cloudConfigured,
                                     geminiConfigured = geminiConfigured,
                                     onOpenCloudSettings = { showCloudSettings = true },
                                     onOpenGeminiSettings = { showGeminiSettings = true },
                                     onTranslate = { engine, cloudOcr, bilingual, output, share ->
-                                        viewModel.translateDocument(document.id, engine, cloudOcr, bilingual, output) { file -> deliver(listOf(file), output, share) }
+                                        withFeatures(translateFeatures(cloudOcr)) {
+                                            viewModel.translateDocument(document.id, engine, cloudOcr, bilingual, output) { file -> deliver(listOf(file), output, share) }
+                                        }
                                     },
                                     onDelete = {
                                         viewModel.moveToTrash(document.id)
@@ -473,7 +533,10 @@ class MainActivity : ComponentActivity() {
                                         TextButton(onClick = {
                                             val uris = convertUris
                                             convertUris = emptyList()
-                                            viewModel.convertFiles(uris, f, convertWithCloud && cloudConfigured) { file -> convertedFile = file to f }
+                                            val withCloud = convertWithCloud && cloudConfigured
+                                            withFeatures(officeFeatures(f, withCloud)) {
+                                                viewModel.convertFiles(uris, f, withCloud) { file -> convertedFile = file to f }
+                                            }
                                         }) { Text(f.label) }
                                     }
                                     Row(
@@ -502,7 +565,9 @@ class MainActivity : ComponentActivity() {
                             onConfirm = { engine, cloudOcr, bilingual, output, _ ->
                                 val uris = translateUris
                                 translateUris = emptyList()
-                                viewModel.translateFiles(uris, engine, cloudOcr, bilingual, output) { file -> convertedFile = file to output }
+                                withFeatures(translateFeatures(cloudOcr)) {
+                                    viewModel.translateFiles(uris, engine, cloudOcr, bilingual, output) { file -> convertedFile = file to output }
+                                }
                             },
                         )
                     }
@@ -543,6 +608,25 @@ class MainActivity : ComponentActivity() {
                                 showGeminiSettings = false
                             },
                         )
+                    }
+
+                    paywallFeature?.let { feature ->
+                        BusinessPaywallDialog(
+                            feature = feature,
+                            entitlements = entitlements,
+                            loggedIn = entitlements.email != null,
+                            refreshing = entitlementsRefreshing,
+                            refreshError = entitlementsError,
+                            trialsRemaining = entitlementsViewModel::trialsRemaining,
+                            onLogin = { paywallFeature = null; screen = Screen.Account },
+                            onRefresh = { entitlementsViewModel.refresh() },
+                            onOpenPricing = pricingAction?.let { open -> { paywallFeature = null; open() } },
+                            onDismiss = { paywallFeature = null },
+                        )
+                    }
+                    // Làm mới xong mà đã có Business → tự đóng hộp thoại.
+                    LaunchedEffect(entitlements.businessActive) {
+                        if (entitlements.businessActive) paywallFeature = null
                     }
 
                     convertedFile?.let { (file, format) ->

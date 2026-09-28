@@ -16,12 +16,54 @@ interface Plan {
   duration_days: number;
 }
 type Provider = 'vnpay' | 'momo';
+interface BusinessFeature {
+  key: string;
+  label: string;
+  freeTrials: number;
+}
+
+/** Tính năng miễn phí (chạy trên máy) — hiển thị để khách thấy rõ gói Free đã đủ nhu cầu cơ bản. */
+const FREE_FEATURES = [
+  'Quét tài liệu, tự nhận mép giấy, lọc màu / đen trắng, xoá bóng',
+  'OCR tiếng Việt, PDF có lớp chữ tìm kiếm được (4 chế độ)',
+  'Xuất ảnh JPG, văn bản TXT',
+  'Chụp để dịch, dịch trực tiếp khi soi camera',
+];
+
+function FeatureTable({ features }: { features: BusinessFeature[] }) {
+  const rows: [string, string, boolean][] = [
+    ...FREE_FEATURES.map((f): [string, string, boolean] => [f, '✓', true]),
+    ...features.map((f): [string, string, boolean] => [f.label, f.freeTrials > 0 ? `Dùng thử ${f.freeTrials} lượt` : '—', true]),
+  ];
+  return (
+    <div className="mt-8 overflow-x-auto rounded-xl border border-line bg-surface">
+      <table className="w-full text-sm">
+        <thead className="text-left text-xs text-ink-3">
+          <tr>
+            <th className="px-4 py-3 font-medium">Tính năng</th>
+            <th className="px-4 py-3 text-center font-medium">Miễn phí</th>
+            <th className="px-4 py-3 text-center font-medium text-accent">Business</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(([label, free, business]) => (
+            <tr key={label} className="border-t border-line">
+              <td className="px-4 py-2.5">{label}</td>
+              <td className={`px-4 py-2.5 text-center ${free === '✓' ? 'text-good' : 'text-ink-3'}`}>{free}</td>
+              <td className="px-4 py-2.5 text-center text-good">{business ? '✓' : '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 const PROVIDER_LABEL: Record<Provider, string> = { vnpay: 'VNPay (ATM / QR / thẻ quốc tế)', momo: 'Ví MoMo' };
 
 export default function PricingPage() {
   const { user, loading: authLoading } = useAuth();
-  const { data, error, loading } = useApi<{ plans: Plan[]; providers: Record<Provider, boolean> }>('/plans');
+  const { data, error, loading } = useApi<{ plans: Plan[]; providers: Record<Provider, boolean>; businessFeatures?: BusinessFeature[] }>('/plans');
   const [selected, setSelected] = useState<string | null>(null);
   const [busy, setBusy] = useState<Provider | null>(null);
   const [payError, setPayError] = useState<string | null>(null);
@@ -114,6 +156,8 @@ export default function PricingPage() {
             )}
           </Card>
         )}
+
+        {data?.businessFeatures && <FeatureTable features={data.businessFeatures} />}
 
         <p className="mt-8 text-xs text-ink-3">
           Đã thanh toán? Xem trạng thái tại <Link href="/account" className="text-accent underline">Tài khoản</Link>.

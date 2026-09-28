@@ -37,6 +37,13 @@ Mọi request có `Auth: ✓` cần header `Authorization: Bearer <firebase-id-t
 | POST   | `/admin/orders/:id/confirm` \| `/cancel` | admin | Xác nhận tay (chuyển khoản / IPN lỡ) hoặc huỷ đơn chờ |
 | GET/PATCH | `/admin/plans[/:id]` | admin | Sửa tên / giá / thời hạn / ẩn-hiện gói |
 
+### Gói Business trong app (entitlements)
+
+- Danh sách tính năng Business + lượt dùng thử nằm DUY NHẤT ở `src/users/entitlements.ts` — sửa file này rồi deploy là app Android/iOS và trang bảng giá web tự cập nhật (không cần phát hành lại app).
+- Hiện tại: **Miễn phí** = quét, lọc, cắt, OCR, PDF 4 chế độ, xuất JPG/TXT, chụp để dịch, dịch trực tiếp. **Business** = chuyển Word/Excel/PowerPoint (thử 3 lượt/máy), dịch cả tài liệu (thử 3 lượt/máy), AI Cloud đọc chữ viết tay, sao lưu đám mây.
+- `GET /users/me` và `POST /auth/login` trả thêm `business_active` (đã tính hạn) và `entitlements`; `GET /plans` trả `businessFeatures` cho bảng so sánh trên web.
+- `POST /documents` (sao lưu) trả **403** nếu tài khoản chưa có Business còn hạn — chặn ở server vì tốn dung lượng lưu trữ. Các tính năng còn lại chạy trên máy nên chỉ khoá ở app.
+
 - **admin** = token Firebase hợp lệ + email đã xác minh + email nằm trong `ADMIN_EMAILS`.
 - Đơn `paid` → kích hoạt/gia hạn Business (cộng dồn nếu còn hạn) trong cùng 1 transaction; IPN và Return có thể tới 2 lần nhưng chỉ tính 1 lần.
 - Migration (`migrations/*.sql`) **tự chạy khi server khởi động** — không cần vào Shell Render chạy tay nữa.
