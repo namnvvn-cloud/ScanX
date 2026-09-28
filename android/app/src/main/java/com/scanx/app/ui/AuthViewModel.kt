@@ -8,7 +8,13 @@ import com.google.android.gms.auth.api.signin.GoogleSignInClient
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.tasks.Task
 import com.google.android.gms.tasks.Tasks
+import com.google.firebase.FirebaseNetworkException
+import com.google.firebase.FirebaseTooManyRequestsException
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
+import com.google.firebase.auth.FirebaseAuthInvalidUserException
+import com.google.firebase.auth.FirebaseAuthUserCollisionException
+import com.google.firebase.auth.FirebaseAuthWeakPasswordException
 import com.google.firebase.auth.GoogleAuthProvider
 import com.scanx.app.data.BackendApi
 import com.scanx.app.data.DocumentMeta
@@ -76,7 +82,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                 _currentEmail.value = auth.currentUser?.email
                 registerWithBackend()
             } catch (e: Exception) {
-                _error.value = e.message ?: "Đăng nhập thất bại"
+                _error.value = authErrorMessage(e)
             } finally {
                 _busy.value = false
             }
@@ -137,6 +143,22 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             } finally {
                 _busy.value = false
             }
+        }
+    }
+
+    /** Thông báo lỗi đăng nhập dễ hiểu (tiếng Việt) thay cho tên exception kỹ thuật của Firebase. */
+    private fun authErrorMessage(e: Exception): String {
+        val cause = (e as? java.util.concurrent.ExecutionException)?.cause ?: e
+        return when (cause) {
+            is FirebaseNetworkException ->
+                "Không kết nối được máy chủ đăng nhập (Google/Firebase). Kiểm tra mạng: thử đổi Wi-Fi ↔ 4G, " +
+                    "tắt VPN / ứng dụng chặn quảng cáo, và đặt Cài đặt → Kết nối → DNS riêng tư = Tự động."
+            is FirebaseTooManyRequestsException -> "Thử quá nhiều lần — vui lòng đợi vài phút rồi thử lại."
+            is FirebaseAuthWeakPasswordException -> "Mật khẩu quá yếu — cần tối thiểu 6 ký tự."
+            is FirebaseAuthUserCollisionException -> "Email đã được đăng ký — bấm «Đăng nhập» (hoặc «Đăng nhập bằng Google»)."
+            is FirebaseAuthInvalidUserException -> "Chưa có tài khoản với email này — bấm «Đăng ký»."
+            is FirebaseAuthInvalidCredentialsException -> "Email hoặc mật khẩu không đúng."
+            else -> cause.message ?: "Đăng nhập thất bại"
         }
     }
 

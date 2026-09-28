@@ -118,10 +118,32 @@ final class AuthViewModel: ObservableObject {
             _ = try await action()
             await registerWithBackend()
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = Self.authErrorMessage(error)
         }
         isBusy = false
     }
+
+    /// Thông báo lỗi đăng nhập dễ hiểu (tiếng Việt). So mã số của FIRAuthErrorDomain (ổn định qua các bản SDK).
+    static func authErrorMessage(_ error: Error) -> String {
+        let ns = error as NSError
+        guard ns.domain == "FIRAuthErrorDomain" else {
+            if ns.domain == NSURLErrorDomain { return networkMessage }
+            return error.localizedDescription
+        }
+        switch ns.code {
+        case 17020: return networkMessage
+        case 17010: return "Thử quá nhiều lần — vui lòng đợi vài phút rồi thử lại."
+        case 17026: return "Mật khẩu quá yếu — cần tối thiểu 6 ký tự."
+        case 17007: return "Email đã được đăng ký — bấm «Đăng nhập» (hoặc «Đăng nhập bằng Google»)."
+        case 17011: return "Chưa có tài khoản với email này — bấm «Đăng ký»."
+        case 17008: return "Email không hợp lệ."
+        case 17009, 17004: return "Email hoặc mật khẩu không đúng."
+        default: return error.localizedDescription
+        }
+    }
+
+    private static let networkMessage =
+        "Không kết nối được máy chủ đăng nhập (Google/Firebase). Kiểm tra mạng: thử đổi Wi-Fi ↔ 4G, tắt VPN / chặn quảng cáo."
 
     /// Gọi POST /auth/login để backend tự tạo hồ sơ user (upsert theo firebaseUid) — không chặn
     /// đăng nhập nếu backend tạm thời lỗi (ví dụ Render đang "cold start").
