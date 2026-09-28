@@ -16,24 +16,28 @@ interface Plan {
   duration_days: number;
 }
 type Provider = 'vnpay' | 'momo';
-interface BusinessFeature {
+interface CatalogFeature {
   key: string;
   label: string;
-  freeTrials: number;
+  access: 'free' | 'business' | 'off';
+  trials: number;
+}
+interface FeatureCatalog {
+  core: { key: string; label: string }[];
+  features: CatalogFeature[];
 }
 
-/** Tính năng miễn phí (chạy trên máy) — hiển thị để khách thấy rõ gói Free đã đủ nhu cầu cơ bản. */
-const FREE_FEATURES = [
-  'Quét tài liệu, tự nhận mép giấy, lọc màu / đen trắng, xoá bóng',
-  'OCR tiếng Việt, PDF có lớp chữ tìm kiếm được (4 chế độ)',
-  'Xuất ảnh JPG, văn bản TXT',
-  'Chụp để dịch, dịch trực tiếp khi soi camera',
-];
-
-function FeatureTable({ features }: { features: BusinessFeature[] }) {
-  const rows: [string, string, boolean][] = [
-    ...FREE_FEATURES.map((f): [string, string, boolean] => [f, '✓', true]),
-    ...features.map((f): [string, string, boolean] => [f.label, f.freeTrials > 0 ? `Dùng thử ${f.freeTrials} lượt` : '—', true]),
+/** Bảng so sánh Miễn phí / Business — theo đúng chính sách admin tích chọn (Quản trị → Tính năng). */
+function FeatureTable({ catalog }: { catalog: FeatureCatalog }) {
+  const rows: [string, string, string][] = [
+    ...catalog.core.map((c): [string, string, string] => [c.label, '✓', '✓']),
+    ...catalog.features
+      .filter((f) => f.access !== 'off')
+      .map((f): [string, string, string] => [
+        f.label,
+        f.access === 'free' ? '✓' : f.trials > 0 ? `Dùng thử ${f.trials} lượt` : '—',
+        '✓',
+      ]),
   ];
   return (
     <div className="mt-8 overflow-x-auto rounded-xl border border-line bg-surface">
@@ -50,7 +54,7 @@ function FeatureTable({ features }: { features: BusinessFeature[] }) {
             <tr key={label} className="border-t border-line">
               <td className="px-4 py-2.5">{label}</td>
               <td className={`px-4 py-2.5 text-center ${free === '✓' ? 'text-good' : 'text-ink-3'}`}>{free}</td>
-              <td className="px-4 py-2.5 text-center text-good">{business ? '✓' : '—'}</td>
+              <td className="px-4 py-2.5 text-center text-good">{business}</td>
             </tr>
           ))}
         </tbody>
@@ -63,7 +67,7 @@ const PROVIDER_LABEL: Record<Provider, string> = { vnpay: 'VNPay (ATM / QR / th�
 
 export default function PricingPage() {
   const { user, loading: authLoading } = useAuth();
-  const { data, error, loading } = useApi<{ plans: Plan[]; providers: Record<Provider, boolean>; businessFeatures?: BusinessFeature[] }>('/plans');
+  const { data, error, loading } = useApi<{ plans: Plan[]; providers: Record<Provider, boolean>; featureCatalog?: FeatureCatalog }>('/plans');
   const [selected, setSelected] = useState<string | null>(null);
   const [busy, setBusy] = useState<Provider | null>(null);
   const [payError, setPayError] = useState<string | null>(null);
@@ -157,7 +161,7 @@ export default function PricingPage() {
           </Card>
         )}
 
-        {data?.businessFeatures && <FeatureTable features={data.businessFeatures} />}
+        {data?.featureCatalog && <FeatureTable catalog={data.featureCatalog} />}
 
         <p className="mt-8 text-xs text-ink-3">
           Đã thanh toán? Xem trạng thái tại <Link href="/account" className="text-accent underline">Tài khoản</Link>.

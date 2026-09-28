@@ -103,7 +103,7 @@ struct OfficeExportSheet: View {
     /// Tính năng Business mà thao tác này cần (xuất TXT không dịch, không AI = miễn phí).
     private var neededFeatures: [BusinessFeature] {
         var needed: [BusinessFeature] = []
-        if format != .txt { needed.append(.officeExport) }
+        if format != .txt { needed.append(.officeExport) } else { needed.append(.exportImageText) }
         if translate { needed.append(.docTranslate) }
         if useCloud && cloudAvailable { needed.append(.aiHandwriting) }
         return needed

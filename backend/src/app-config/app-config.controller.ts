@@ -1,6 +1,7 @@
 import { BadRequestException, Body, Controller, Get, Put, Query, UseGuards } from '@nestjs/common';
 import { AdminGuard } from '../admin/admin.guard';
 import { AppConfigService } from './app-config.service';
+import { EntitlementsService } from '../users/entitlements';
 
 /**
  * GET /app/config?platform=android|ios&versionCode=N — công khai, app gọi lúc mở:
@@ -8,14 +9,22 @@ import { AppConfigService } from './app-config.service';
  */
 @Controller()
 export class AppConfigController {
-  constructor(private readonly config: AppConfigService) {}
+  constructor(
+    private readonly config: AppConfigService,
+    private readonly entitlements: EntitlementsService,
+  ) {}
 
   @Get('app/config')
   async appConfig(@Query('platform') platform = 'android', @Query('versionCode') versionCode = '0') {
     const p = platform === 'ios' ? 'ios' : 'android';
     const current = Number.parseInt(versionCode, 10) || 0;
-    const [update, productInfo] = await Promise.all([this.config.updateInfo(p, current), this.config.productInfo()]);
-    return { update, productInfo };
+    const [update, productInfo, entitlements] = await Promise.all([
+      this.config.updateInfo(p, current),
+      this.config.productInfo(),
+      this.entitlements.entitlementsFor(null),
+    ]);
+    // entitlements: chính sách tính năng cho người CHƯA đăng nhập (gói Free).
+    return { update, productInfo, entitlements };
   }
 
   /** Web Admin: đọc toàn bộ cấu hình + bản APK mới nhất GitHub đang thấy. */

@@ -13,7 +13,9 @@ const NAV = [
   ['/admin/users', 'Người dùng'],
   ['/admin/orders', 'Đơn hàng'],
   ['/admin/plans', 'Gói cước'],
+  ['/admin/features', 'Tính năng'],
   ['/admin/app', 'Ứng dụng'],
+  ['/admin/admins', 'Quản trị viên'],
 ] as const;
 
 /** Chặn toàn bộ /admin: phải đăng nhập + email nằm trong ADMIN_EMAILS (backend kiểm tra thật qua AdminGuard). */
@@ -59,7 +61,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
               Scan<span className="text-accent">X</span> <span className="text-sm font-medium text-ink-3">Admin</span>
             </Link>
             {state === 'ok' && (
-              <nav className="flex gap-1 text-sm">
+              <nav className="flex flex-wrap gap-1 text-sm">
                 {NAV.map(([href, label]) => {
                   const active = href === '/admin' ? pathname === '/admin' : pathname.startsWith(href);
                   return (

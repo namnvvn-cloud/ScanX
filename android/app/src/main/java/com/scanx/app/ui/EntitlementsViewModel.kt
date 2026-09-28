@@ -5,7 +5,10 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.android.gms.tasks.Tasks
 import com.google.firebase.auth.FirebaseAuth
+import com.scanx.app.BuildConfig
+import com.scanx.app.data.AppConfigRepository
 import com.scanx.app.data.BackendApi
+import com.scanx.app.data.DeviceRegistry
 import com.scanx.app.data.BusinessFeature
 import com.scanx.app.data.Entitlements
 import com.scanx.app.data.EntitlementsStore
@@ -53,11 +56,11 @@ class EntitlementsViewModel(application: Application) : AndroidViewModel(applica
             lastUid = uid
             if (uid == null) {
                 store.clearAccount()
-                _state.value = Entitlements.free(null)
+                _state.value = store.cachedAnonymous()
             } else {
-                _state.value = store.cached(fa.currentUser?.email) ?: Entitlements.free(fa.currentUser?.email)
-                refresh(force = true)
+                _state.value = store.cached(fa.currentUser?.email) ?: store.cachedAnonymous().copy(email = fa.currentUser?.email)
             }
+            refresh(force = true)
         }
     }
 
@@ -72,7 +75,7 @@ class EntitlementsViewModel(application: Application) : AndroidViewModel(applica
 
     private fun initialState(): Entitlements {
         val email = auth.currentUser?.email
-        return store.cached(email) ?: Entitlements.free(email)
+        return store.cached(email) ?: store.cachedAnonymous().copy(email = email)
     }
 
     /** Gọi khi app quay lại foreground — tối đa 1 lần / 30 s để không gọi server liên tục. */
@@ -81,8 +84,8 @@ class EntitlementsViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun refresh(force: Boolean = true) {
-        val user = auth.currentUser ?: run { _state.value = Entitlements.free(null); return }
         if (_refreshing.value && !force) return
+        val user = auth.currentUser ?: run { refreshAnonymous(); return }
         lastRefreshAt = System.currentTimeMillis()
         _refreshing.value = true
         _refreshError.value = null
@@ -91,6 +94,7 @@ class EntitlementsViewModel(application: Application) : AndroidViewModel(applica
                 val token = Tasks.await(user.getIdToken(false))?.token
                     ?: throw IllegalStateException("Không lấy được token đăng nhập")
                 val me = BackendApi(token).me()
+                DeviceRegistry.ping(getApplication<Application>(), token)
                 val email = user.email ?: me.optString("email")
                 store.save(email, me)
                 _state.value = Entitlements.fromUserJson(email, me)
@@ -98,6 +102,24 @@ class EntitlementsViewModel(application: Application) : AndroidViewModel(applica
                 // Giữ trạng thái đã lưu (offline / server đang "ngủ") — chỉ báo lỗi khi người dùng tự bấm làm mới.
                 _refreshError.value = e.message ?: "Không tải được trạng thái gói"
             } finally {
+                _refreshing.value = false
+            }
+        }
+    }
+
+    /** Chưa đăng nhập: tải chính sách tính năng gói Free + báo thiết bị (chưa đăng ký) về backend. */
+    private fun refreshAnonymous() {
+        lastRefreshAt = System.currentTimeMillis()
+        _refreshing.value = true
+        _refreshError.value = null
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                AppConfigRepository(getApplication<Application>()).fetch(BuildConfig.VERSION_CODE)
+                if (auth.currentUser == null) _state.value = store.cachedAnonymous()
+            } catch (e: Exception) {
+                _refreshError.value = e.message ?: "Không tải được chính sách tính năng"
+            } finally {
+                DeviceRegistry.ping(getApplication<Application>(), null)
                 _refreshing.value = false
             }
         }

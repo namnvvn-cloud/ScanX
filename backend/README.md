@@ -50,12 +50,17 @@ Mọi request có `Auth: ✓` cần header `Authorization: Bearer <firebase-id-t
 - Khi chuyển sang Google Play: tắt "Tự lấy từ GitHub", nhập versionCode mới nhất + link Play Store.
 - Bản build tay trên máy dev (versionCode ≤ 1) không bị nhắc/ép.
 
-### Gói Business trong app (entitlements)
+### Quyền tính năng Miễn phí / Business (Web Admin → Tính năng)
 
-- Danh sách tính năng Business + lượt dùng thử nằm DUY NHẤT ở `src/users/entitlements.ts` — sửa file này rồi deploy là app Android/iOS và trang bảng giá web tự cập nhật (không cần phát hành lại app).
-- Hiện tại: **Miễn phí** = quét, lọc, cắt, OCR, PDF 4 chế độ, xuất JPG/TXT, chụp để dịch, dịch trực tiếp. **Business** = chuyển Word/Excel/PowerPoint (thử 3 lượt/máy), dịch cả tài liệu (thử 3 lượt/máy), AI Cloud đọc chữ viết tay, sao lưu đám mây.
-- `GET /users/me` và `POST /auth/login` trả thêm `business_active` (đã tính hạn) và `entitlements`; `GET /plans` trả `businessFeatures` cho bảng so sánh trên web.
-- `POST /documents` (sao lưu) trả **403** nếu tài khoản chưa có Business còn hạn — chặn ở server vì tốn dung lượng lưu trữ. Các tính năng còn lại chạy trên máy nên chỉ khoá ở app.
+- Admin tích chọn từng tính năng: **Miễn phí** (ai cũng dùng) / chỉ **Business** (Free được N lượt thử/máy) / bỏ cả hai = **tạm tắt**. Lưu ở `app_config.feature_policy`; logic ở `src/users/entitlements.ts` (`EntitlementsService`, cache 30 s). Quét + OCR/PDF là tính năng lõi, luôn miễn phí.
+- `GET /users/me`, `POST /auth/login`, `GET /billing/me` trả `business_active` + `entitlements` (features, featureAccess, freeTrials…); `GET /app/config` trả `entitlements` cho người CHƯA đăng nhập; `GET /plans` trả `featureCatalog` cho bảng so sánh.
+- `POST /documents` (sao lưu) trả **403** nếu `cloud_backup` không được phép — chặn ở server. Các tính năng khác chạy trên máy nên khoá trong app.
+- `GET/PUT /admin/features` — checklist.
+
+### Thiết bị & quản trị viên
+
+- `POST /devices/ping` (không cần đăng nhập; có Bearer thì gắn với tài khoản): app gửi mỗi lần mở — mã cài đặt ngẫu nhiên, phiên bản app, dòng máy, phiên bản OS, ngôn ngữ. Bảng `devices`. Admin xem ở Người dùng → Thiết bị đã cài app (lọc "Chưa đăng ký"); `GET /admin/devices`.
+- Quản trị viên chính = `ADMIN_EMAILS` (Render). Quản trị viên phụ = bảng `admins`, admin chính thêm/gỡ trên web (`GET/POST/DELETE /admin/admins`). Phụ dùng mọi chức năng trừ thêm/gỡ admin. Đăng nhập web phải bằng Google (email đã xác minh).
 
 - **admin** = token Firebase hợp lệ + email đã xác minh + email nằm trong `ADMIN_EMAILS`.
 - Đơn `paid` → kích hoạt/gia hạn Business (cộng dồn nếu còn hạn) trong cùng 1 transaction; IPN và Return có thể tới 2 lần nhưng chỉ tính 1 lần.

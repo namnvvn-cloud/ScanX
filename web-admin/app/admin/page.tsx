@@ -19,8 +19,11 @@ interface Stats {
     orders_pending: number;
     revenue_total: number;
     revenue_30d: number;
+    devices: number;
+    devices_unregistered: number;
+    devices_active_7d: number;
   };
-  series: { day: string; signups: number; documents: number; revenue: number }[];
+  series: { day: string; signups: number; documents: number; revenue: number; installs: number }[];
 }
 
 const num = (n: number) => new Intl.NumberFormat('vi-VN').format(n);
@@ -54,6 +57,8 @@ export default function AdminDashboard() {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">Tổng quan</h1>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Tile label="Lượt cài app (thiết bị)" value={num(t.devices ?? 0)} sub={`${num(t.devices_active_7d ?? 0)} mở app trong 7 ngày`} href="/admin/users?tab=devices" />
+        <Tile label="Cài nhưng chưa đăng ký" value={num(t.devices_unregistered ?? 0)} sub={t.devices ? `${Math.round(((t.devices_unregistered ?? 0) / t.devices) * 100)}% thiết bị` : undefined} href="/admin/users?tab=devices" />
         <Tile label="Người dùng" value={num(t.users)} sub={`+${num(t.users_30d)} trong 30 ngày`} href="/admin/users" />
         <Tile label="Business đang hoạt động" value={num(t.business_active)} sub={`${t.users ? Math.round((t.business_active / t.users) * 100) : 0}% người dùng`} href="/admin/users?filter=business" />
         <Tile label="Hoạt động 7 ngày" value={num(t.active_7d)} sub="đăng nhập gần đây" />
@@ -64,6 +69,7 @@ export default function AdminDashboard() {
         <Tile label="Đơn chờ thanh toán" value={num(t.orders_pending)} href="/admin/orders?status=pending" />
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
+        <DailyBars title="Lượt cài mới" data={data.series.map((s) => ({ day: s.day, value: s.installs ?? 0 }))} format={num} />
         <DailyBars title="Người dùng mới" data={data.series.map((s) => ({ day: s.day, value: s.signups }))} format={num} />
         <DailyBars title="Doanh thu" data={data.series.map((s) => ({ day: s.day, value: s.revenue }))} format={vnd} />
       </div>

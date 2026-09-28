@@ -20,6 +20,7 @@ interface Detail {
   };
   documents: { id: string; title: string; page_count: number; file_size: number | null; created_at: string }[];
   orders: { id: string; code: string; plan_id: string; amount_vnd: number; provider: string; status: string; created_at: string; paid_at: string | null }[];
+  devices?: { install_id: string; platform: string; model: string | null; os_version: string | null; version_name: string | null; last_seen: string; open_count: number }[];
 }
 
 export default function UserDetailPage() {
@@ -127,6 +128,27 @@ export default function UserDetailPage() {
             Lưu
           </Button>
         </div>
+      </Card>
+
+      <Card>
+        <h2 className="font-semibold">Thiết bị ({data.devices?.length ?? 0})</h2>
+        {!data.devices?.length ? (
+          <p className="mt-2 text-sm text-ink-2">Chưa ghi nhận thiết bị (app bản cũ chưa báo cài đặt).</p>
+        ) : (
+          <ul className="mt-3 divide-y divide-line text-sm">
+            {data.devices.map((d) => (
+              <li key={d.install_id} className="flex flex-wrap items-baseline justify-between gap-2 py-2">
+                <span>
+                  {d.model || 'Không rõ dòng máy'} · {d.platform === 'ios' ? 'iOS' : 'Android'} {d.os_version ?? ''}
+                  <span className="ml-2 text-xs text-ink-3">app {d.version_name ?? '—'}</span>
+                </span>
+                <span className="text-xs text-ink-3">
+                  Mở {d.open_count} lần · gần nhất {dateTime(d.last_seen)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
       </Card>
 
       <Card>

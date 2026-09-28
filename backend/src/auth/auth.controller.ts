@@ -3,11 +3,14 @@ import { FirebaseAuthGuard } from './firebase-auth.guard';
 import { CurrentUser } from './current-user.decorator';
 import { FirebaseUser } from './firebase-auth.guard';
 import { UsersService } from '../users/users.service';
-import { withEntitlements } from '../users/entitlements';
+import { EntitlementsService } from '../users/entitlements';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly entitlements: EntitlementsService,
+  ) {}
 
   /**
    * POST /auth/login
@@ -19,6 +22,6 @@ export class AuthController {
   @Post('login')
   async login(@CurrentUser() user: FirebaseUser) {
     const profile = await this.usersService.upsertFromFirebase(user);
-    return { user: withEntitlements(profile) };
+    return { user: await this.entitlements.withEntitlements(profile) };
   }
 }

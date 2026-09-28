@@ -14,7 +14,7 @@ import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { FirebaseUser } from '../auth/firebase-auth.guard';
 import { UsersService } from '../users/users.service';
-import { businessActive } from '../users/entitlements';
+import { EntitlementsService } from '../users/entitlements';
 import { DocumentsService } from './documents.service';
 import { CreateDocumentDto } from './dto/create-document.dto';
 import { UpdateDocumentDto } from './dto/update-document.dto';
@@ -30,6 +30,7 @@ export class DocumentsController {
   constructor(
     private readonly documentsService: DocumentsService,
     private readonly usersService: UsersService,
+    private readonly entitlements: EntitlementsService,
   ) {}
 
   private async resolveUserId(fbUid: string): Promise<string> {
@@ -51,8 +52,8 @@ export class DocumentsController {
   async create(@CurrentUser() fbUser: FirebaseUser, @Body() dto: CreateDocumentDto) {
     const user = await this.usersService.findByFirebaseUid(fbUser.uid);
     if (!user) throw new NotFoundException('Chưa có hồ sơ user — gọi POST /auth/login trước');
-    if (!businessActive(user)) {
-      throw new ForbiddenException('Sao lưu đám mây là tính năng Business — tài khoản chưa có gói Business còn hạn');
+    if (!(await this.entitlements.allowed(user, 'cloud_backup'))) {
+      throw new ForbiddenException('Sao lưu đám mây chưa được mở cho tài khoản này (cần gói Business còn hạn)');
     }
     return this.documentsService.createWithUploadUrl(user.id, dto);
   }

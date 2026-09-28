@@ -5,6 +5,8 @@ import SwiftUI
 /// Tính năng Business — tương đương BusinessFeature bên Android. Danh sách thật do backend quyết định
 /// (backend/src/users/entitlements.ts, GET /users/me); nhãn + lượt thử ở đây chỉ là giá trị dự phòng.
 enum BusinessFeature: String, CaseIterable, Identifiable {
+    case exportImageText = "export_image_text"
+    case cameraTranslate = "camera_translate"
     case officeExport = "office_export"
     case docTranslate = "doc_translate"
     case aiHandwriting = "ai_handwriting"
@@ -14,6 +16,8 @@ enum BusinessFeature: String, CaseIterable, Identifiable {
 
     var fallbackLabel: String {
         switch self {
+        case .exportImageText: return "Xuất ảnh JPG, văn bản TXT"
+        case .cameraTranslate: return "Chụp để dịch, dịch trực tiếp khi soi camera"
         case .officeExport: return "Chuyển sang Word / Excel / PowerPoint giữ bố cục"
         case .docTranslate: return "Dịch cả tài liệu sang tiếng Việt (bản dịch / song ngữ)"
         case .aiHandwriting: return "AI Cloud đọc chữ viết tay, bản chụp khó"
@@ -24,7 +28,15 @@ enum BusinessFeature: String, CaseIterable, Identifiable {
     var fallbackTrials: Int {
         switch self {
         case .officeExport, .docTranslate: return 3
-        case .aiHandwriting, .cloudBackup: return 0
+        case .aiHandwriting, .cloudBackup, .exportImageText, .cameraTranslate: return 0
+        }
+    }
+
+    /** "free" | "business" | "off" khi chưa tải được chính sách từ server. */
+    var fallbackAccess: String {
+        switch self {
+        case .exportImageText, .cameraTranslate: return "free"
+        default: return "business"
         }
     }
 }
@@ -48,6 +60,7 @@ final class EntitlementsManager: ObservableObject {
     @Published private(set) var features: [String: Bool] = [:]
     @Published private(set) var labels: [String: String] = [:]
     @Published private(set) var freeTrials: [String: Int] = [:]
+    @Published private(set) var featureAccess: [String: String] = [:]
     @Published private(set) var refreshing = false
     @Published private(set) var refreshError: String?
     /// Tăng mỗi lần trừ lượt thử để SwiftUI vẽ lại số lượt còn lại.
@@ -61,6 +74,7 @@ final class EntitlementsManager: ObservableObject {
     private enum Key {
         static let email = "ent.email"
         static let userJSON = "ent.userJSON"
+        static let anonJSON = "ent.anonJSON"
         static func trialUsed(_ f: BusinessFeature) -> String { "ent.trialUsed.\(f.rawValue)" }
     }
 
@@ -80,9 +94,16 @@ final class EntitlementsManager: ObservableObject {
         return true
     }
 
-    func has(_ f: BusinessFeature) -> Bool { businessActive && (features[f.rawValue] ?? true) }
+    func access(_ f: BusinessFeature) -> String { featureAccess[f.rawValue] ?? f.fallbackAccess }
+    func has(_ f: BusinessFeature) -> Bool {
+        switch access(f) {
+        case "free": return true
+        case "off": return false
+        default: return businessActive
+        }
+    }
     func label(_ f: BusinessFeature) -> String { labels[f.rawValue] ?? f.fallbackLabel }
-    func trialLimit(_ f: BusinessFeature) -> Int { freeTrials[f.rawValue] ?? f.fallbackTrials }
+    func trialLimit(_ f: BusinessFeature) -> Int { access(f) == "business" ? (freeTrials[f.rawValue] ?? f.fallbackTrials) : 0 }
     func trialsRemaining(_ f: BusinessFeature) -> Int {
         max(0, trialLimit(f) - defaults.integer(forKey: Key.trialUsed(f)))
     }
@@ -105,7 +126,7 @@ final class EntitlementsManager: ObservableObject {
 
     func refresh() {
         guard let user = Auth.auth().currentUser else {
-            apply(email: nil, user: [:])
+            refreshAnonymous()
             return
         }
         lastRefresh = Date()
@@ -115,6 +136,7 @@ final class EntitlementsManager: ObservableObject {
             do {
                 let token = try await user.getIDToken()
                 let me = try await BackendAPI(idToken: token).me()
+                await DeviceRegistry.ping(idToken: token)
                 let mail = user.email ?? (me["email"] as? String)
                 if let mail, let data = try? JSONSerialization.data(withJSONObject: me) {
                     defaults.set(mail, forKey: Key.email)
@@ -129,13 +151,41 @@ final class EntitlementsManager: ObservableObject {
         }
     }
 
+    /// Chưa đăng nhập: tải chính sách tính năng gói Free (GET /app/config) + báo thiết bị về backend.
+    private func refreshAnonymous() {
+        lastRefresh = Date()
+        refreshing = true
+        refreshError = nil
+        Task {
+            do {
+                let json = try await BackendAPI.appConfig(platform: "ios", versionCode: AppConfigManager.buildNumber)
+                if let ent = json["entitlements"] as? [String: Any],
+                   let data = try? JSONSerialization.data(withJSONObject: ["entitlements": ent]) {
+                    defaults.set(data, forKey: Key.anonJSON)
+                }
+                if Auth.auth().currentUser == nil { loadAnonymous() }
+            } catch {
+                refreshError = error.localizedDescription
+            }
+            await DeviceRegistry.ping(idToken: nil)
+            refreshing = false
+        }
+    }
+
+    private func loadAnonymous() {
+        let obj = defaults.data(forKey: Key.anonJSON)
+            .flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] } ?? [:]
+        apply(email: nil, user: obj)
+    }
+
     private func authChanged(_ user: User?) {
         guard user?.uid != lastUID else { return }
         lastUID = user?.uid
         if user == nil {
             defaults.removeObject(forKey: Key.email)
             defaults.removeObject(forKey: Key.userJSON)
-            apply(email: nil, user: [:])
+            loadAnonymous()
+            refresh()
         } else {
             loadCache(email: user?.email)
             refresh()
@@ -148,7 +198,9 @@ final class EntitlementsManager: ObservableObject {
               let data = defaults.data(forKey: Key.userJSON),
               let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         else {
-            apply(email: email, user: [:])
+            // Chưa có bản lưu của tài khoản này → dùng chính sách gói Free đã tải.
+            loadAnonymous()
+            self.email = email
             return
         }
         apply(email: email, user: obj)
@@ -163,6 +215,7 @@ final class EntitlementsManager: ObservableObject {
         features = ent["features"] as? [String: Bool] ?? [:]
         labels = ent["featureLabels"] as? [String: String] ?? [:]
         freeTrials = ent["freeTrials"] as? [String: Int] ?? [:]
+        featureAccess = ent["featureAccess"] as? [String: String] ?? [:]
     }
 
     private static func parseDate(_ s: String) -> Date? {
@@ -181,13 +234,13 @@ struct BusinessFeatureList: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ForEach(BusinessFeature.allCases) { f in
+            ForEach(BusinessFeature.allCases.filter { ent.access($0) != "off" }) { f in
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: ent.has(f) ? "checkmark.circle.fill" : "lock.fill")
                         .foregroundStyle(ent.has(f) ? Color.accentColor : Color.secondary)
                         .accessibilityLabel(ent.has(f) ? "Đã mở" : "Đang khoá")
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(ent.label(f))
+                        Text(ent.label(f) + (ent.access(f) == "free" ? " (miễn phí)" : ""))
                             .fontWeight(f == highlight ? .semibold : .regular)
                         if !ent.has(f) && ent.trialLimit(f) > 0 {
                             Text("Dùng thử: còn \(ent.trialsRemaining(f))/\(ent.trialLimit(f)) lượt")
@@ -213,10 +266,14 @@ struct BusinessPaywallView: View {
             List {
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
-                        Label("Tính năng ScanX Business", systemImage: "crown.fill")
+                        Label(ent.access(feature) == "off" ? "Tính năng tạm ngừng" : "Tính năng ScanX Business", systemImage: "crown.fill")
                             .font(.headline)
-                        Text("«\(ent.label(feature))» dành cho tài khoản Business."
-                             + (ent.trialLimit(feature) > 0 ? " Bạn đã dùng hết lượt dùng thử miễn phí." : ""))
+                        if ent.access(feature) == "off" {
+                            Text("«\(ent.label(feature))» đang tạm ngừng cung cấp. Vui lòng thử lại sau.")
+                        } else {
+                            Text("«\(ent.label(feature))» dành cho tài khoản Business."
+                                 + (ent.trialLimit(feature) > 0 ? " Bạn đã dùng hết lượt dùng thử miễn phí." : ""))
+                        }
                     }
                 }
                 Section("Business mở khoá") {

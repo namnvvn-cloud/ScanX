@@ -1,5 +1,6 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { IsBoolean, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { Body, Controller, Delete, ForbiddenException, Get, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
+import { IsBoolean, IsEmail, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { EntitlementsService } from '../users/entitlements';
 import { AdminGuard } from './admin.guard';
 import { AdminService } from './admin.service';
 
@@ -21,6 +22,10 @@ class UpdatePlanDto {
   @IsOptional() @IsBoolean() active?: boolean;
 }
 
+class AddAdminDto {
+  @IsEmail() email: string;
+}
+
 function pageArgs(page?: string, pageSize?: string): [number, number] {
   const p = Math.max(1, parseInt(page || '1', 10) || 1);
   const s = Math.min(100, Math.max(5, parseInt(pageSize || '20', 10) || 20));
@@ -31,11 +36,49 @@ function pageArgs(page?: string, pageSize?: string): [number, number] {
 @UseGuards(AdminGuard)
 @Controller('admin')
 export class AdminController {
-  constructor(private readonly admin: AdminService) {}
+  constructor(
+    private readonly admin: AdminService,
+    private readonly entitlements: EntitlementsService,
+  ) {}
 
   @Get('me')
-  me() {
-    return { ok: true };
+  me(@Req() req: any) {
+    return { ok: true, email: req.user?.email ?? null, role: req.adminRole };
+  }
+
+  @Get('devices')
+  devices(@Query('q') q = '', @Query('filter') filter = '', @Query('page') page?: string, @Query('pageSize') pageSize?: string) {
+    return this.admin.listDevices(q.trim(), filter, ...pageArgs(page, pageSize));
+  }
+
+  // ---- Quản trị viên: xem = mọi admin; thêm/xoá = chỉ quản trị viên chính (ADMIN_EMAILS) ----
+  @Get('admins')
+  admins() {
+    return this.admin.listAdmins();
+  }
+
+  @Post('admins')
+  addAdmin(@Req() req: any, @Body() dto: AddAdminDto) {
+    if (req.adminRole !== 'super') throw new ForbiddenException('Chỉ quản trị viên chính mới thêm được quản trị viên');
+    return this.admin.addAdmin(dto.email, req.user?.email ?? '');
+  }
+
+  @Delete('admins/:email')
+  removeAdmin(@Req() req: any, @Param('email') email: string) {
+    if (req.adminRole !== 'super') throw new ForbiddenException('Chỉ quản trị viên chính mới xoá được quản trị viên');
+    return this.admin.removeAdmin(email);
+  }
+
+  // ---- Chính sách tính năng Miễn phí / Business (checklist) ----
+  @Get('features')
+  features() {
+    return this.entitlements.catalog();
+  }
+
+  @Put('features')
+  async setFeatures(@Body() body: any) {
+    await this.entitlements.setPolicy(body?.policy ?? body);
+    return this.entitlements.catalog();
   }
 
   @Get('stats')

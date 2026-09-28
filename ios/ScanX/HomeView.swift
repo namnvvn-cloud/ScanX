@@ -12,6 +12,7 @@ struct HomeView: View {
     @State private var showSettings = false
     @State private var showPhotoTranslate = false
     @State private var showUnsupported = false
+    @State private var paywall: BusinessFeature?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -144,7 +145,11 @@ struct HomeView: View {
             .disabled(library.isSaving)
 
             Button {
-                showPhotoTranslate = true
+                // "Chụp để dịch / dịch trực tiếp" có thể bị admin chuyển sang Business hoặc tạm tắt.
+                switch EntitlementsManager.shared.tryUse([.cameraTranslate]) {
+                case .locked(let f): paywall = f
+                case .business, .trial: showPhotoTranslate = true
+                }
             } label: {
                 Label("Dịch", systemImage: "character.bubble")
                     .font(.headline)
@@ -158,6 +163,7 @@ struct HomeView: View {
         .fullScreenCover(isPresented: $showPhotoTranslate) {
             PhotoTranslateView()
         }
+        .sheet(item: $paywall) { f in BusinessPaywallView(feature: f) }
     }
 }
 

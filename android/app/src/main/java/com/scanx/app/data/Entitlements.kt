@@ -5,14 +5,17 @@ import org.json.JSONObject
 import java.time.Instant
 
 /**
- * Tính năng Business. Danh sách "thật" do backend quyết định (backend/src/users/entitlements.ts, trả qua
- * GET /users/me); nhãn + lượt dùng thử ở đây chỉ là giá trị dự phòng khi chưa từng tải được từ server.
+ * Tính năng có thể khoá theo gói. Quyền THẬT do admin tích chọn trên Web Admin → "Tính năng"
+ * (backend/src/users/entitlements.ts, trả qua GET /users/me và GET /app/config); nhãn / quyền / lượt thử
+ * ở đây chỉ là dự phòng khi chưa từng tải được từ server. Quét + OCR/PDF là tính năng lõi, luôn miễn phí.
  */
-enum class BusinessFeature(val key: String, val fallbackLabel: String, val fallbackTrials: Int) {
-    OFFICE_EXPORT("office_export", "Chuyển sang Word / Excel / PowerPoint giữ bố cục", 3),
-    DOC_TRANSLATE("doc_translate", "Dịch cả tài liệu sang tiếng Việt (bản dịch / song ngữ)", 3),
-    AI_HANDWRITING("ai_handwriting", "AI Cloud đọc chữ viết tay, bản chụp khó", 0),
-    CLOUD_BACKUP("cloud_backup", "Sao lưu tài liệu lên đám mây", 0),
+enum class BusinessFeature(val key: String, val fallbackLabel: String, val fallbackAccess: String, val fallbackTrials: Int) {
+    EXPORT_IMAGE_TEXT("export_image_text", "Xuất ảnh JPG, văn bản TXT", "free", 0),
+    CAMERA_TRANSLATE("camera_translate", "Chụp để dịch, dịch trực tiếp khi soi camera", "free", 0),
+    OFFICE_EXPORT("office_export", "Chuyển sang Word / Excel / PowerPoint giữ bố cục", "business", 3),
+    DOC_TRANSLATE("doc_translate", "Dịch cả tài liệu sang tiếng Việt (bản dịch / song ngữ)", "business", 3),
+    AI_HANDWRITING("ai_handwriting", "AI Cloud đọc chữ viết tay, bản chụp khó", "business", 0),
+    CLOUD_BACKUP("cloud_backup", "Sao lưu tài liệu lên đám mây", "business", 0),
 }
 
 /** Trạng thái gói của tài khoản đang đăng nhập (hoặc Free khi chưa đăng nhập). */
@@ -26,16 +29,27 @@ data class Entitlements(
     val labels: Map<String, String>,
     val freeTrials: Map<String, Int>,
     val fetchedAt: Long,
+    /** "free" | "business" | "off" theo chính sách admin (null = server cũ chưa gửi). */
+    val featureAccess: Map<String, String> = emptyMap(),
 ) {
     /** Tính lại theo giờ máy để gói hết hạn khi đang offline vẫn bị khoá đúng hạn. */
     val businessActive: Boolean
         get() = serverBusinessActive && (businessExpiresAt == null || businessExpiresAt > System.currentTimeMillis())
 
-    fun hasFeature(f: BusinessFeature): Boolean = businessActive && (features[f.key] ?: true)
+    fun access(f: BusinessFeature): String = featureAccess[f.key] ?: f.fallbackAccess
+
+    fun hasFeature(f: BusinessFeature): Boolean = when (access(f)) {
+        "free" -> true
+        "off" -> false
+        else -> businessActive
+    }
 
     fun label(f: BusinessFeature): String = labels[f.key] ?: f.fallbackLabel
 
-    fun trialLimit(f: BusinessFeature): Int = freeTrials[f.key] ?: f.fallbackTrials
+    fun trialLimit(f: BusinessFeature): Int = if (access(f) == "business") freeTrials[f.key] ?: f.fallbackTrials else 0
+
+    /** Giữ chính sách (quyền/nhãn/lượt thử) nhưng bỏ gói — dùng khi đăng xuất. */
+    fun asAnonymous(): Entitlements = copy(email = null, serverBusinessActive = false, businessExpiresAt = null)
 
     companion object {
         fun free(email: String?) = Entitlements(email, false, null, emptyMap(), emptyMap(), emptyMap(), 0L)
@@ -59,6 +73,7 @@ data class Entitlements(
                 labels = map(ent?.optJSONObject("featureLabels")) { o, k -> o.optString(k) },
                 freeTrials = map(ent?.optJSONObject("freeTrials")) { o, k -> o.optInt(k) },
                 fetchedAt = now,
+                featureAccess = map(ent?.optJSONObject("featureAccess")) { o, k -> o.optString(k) },
             )
         }
     }
@@ -87,6 +102,16 @@ class EntitlementsStore(context: Context) {
             .apply()
     }
 
+    /** Chính sách cho người CHƯA đăng nhập (từ GET /app/config → entitlements). */
+    fun saveAnonymous(entitlements: JSONObject) {
+        prefs.edit().putString(KEY_ANON_JSON, JSONObject().put("entitlements", entitlements).toString()).apply()
+    }
+
+    fun cachedAnonymous(): Entitlements =
+        prefs.getString(KEY_ANON_JSON, null)
+            ?.let { runCatching { Entitlements.fromUserJson(null, JSONObject(it)) }.getOrNull() }
+            ?: Entitlements.free(null)
+
     fun clearAccount() {
         prefs.edit().remove(KEY_EMAIL).remove(KEY_USER_JSON).remove(KEY_FETCHED_AT).apply()
     }
@@ -102,5 +127,6 @@ class EntitlementsStore(context: Context) {
         const val KEY_USER_JSON = "user_json"
         const val KEY_FETCHED_AT = "fetched_at"
         const val KEY_TRIAL_PREFIX = "trial_used_"
+        const val KEY_ANON_JSON = "anon_json"
     }
 }

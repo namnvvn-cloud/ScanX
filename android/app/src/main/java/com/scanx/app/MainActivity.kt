@@ -200,6 +200,7 @@ class MainActivity : ComponentActivity() {
                     fun officeFeatures(format: ExportFormat, useCloud: Boolean): List<BusinessFeature> = buildList {
                         val office = format == ExportFormat.DOCX || format == ExportFormat.XLSX || format == ExportFormat.PPTX
                         if (office) add(BusinessFeature.OFFICE_EXPORT)
+                        if (format == ExportFormat.JPG || format == ExportFormat.TXT) add(BusinessFeature.EXPORT_IMAGE_TEXT)
                         if (office && useCloud && cloudConfigured) add(BusinessFeature.AI_HANDWRITING)
                     }
 
@@ -375,7 +376,9 @@ class MainActivity : ComponentActivity() {
                                 onImportFilesClick = { importLauncher.launch("image/*") },
                                 onScanAuto = { startScan(CaptureMode.AUTO) },
                                 onScanManual = { startScan(CaptureMode.MANUAL) },
-                                onCameraTranslate = { requestCameraThenOpen(Screen.Translate) },
+                                onCameraTranslate = {
+                                    withFeatures(listOf(BusinessFeature.CAMERA_TRANSLATE)) { requestCameraThenOpen(Screen.Translate) }
+                                },
                                 onComingSoon = { showComingSoon() },
                                 onConvertFiles = { convertPicker.launch(arrayOf("application/pdf", "image/*")) },
                                 onTranslateFiles = { translatePicker.launch(arrayOf("application/pdf", "image/*")) },

@@ -3,6 +3,7 @@ import { DatabaseService } from '../database/database.service';
 import { DocumentRow, OrderRow, PlanRow, UserRow } from '../database/entities';
 import { R2Service } from '../storage/r2.service';
 import { BillingService } from '../billing/billing.service';
+import { adminEmails } from './admin.guard';
 
 export interface Page<T> {
   items: T[];
@@ -33,7 +34,10 @@ export class AdminService {
         (select count(*) from orders where status = 'paid')::int as orders_paid,
         (select count(*) from orders where status = 'pending')::int as orders_pending,
         (select coalesce(sum(amount_vnd), 0) from orders where status = 'paid')::bigint as revenue_total,
-        (select coalesce(sum(amount_vnd), 0) from orders where status = 'paid' and paid_at > now() - interval '30 days')::bigint as revenue_30d
+        (select coalesce(sum(amount_vnd), 0) from orders where status = 'paid' and paid_at > now() - interval '30 days')::bigint as revenue_30d,
+        (select count(*) from devices)::int as devices,
+        (select count(*) from devices where user_id is null)::int as devices_unregistered,
+        (select count(*) from devices where last_seen > now() - interval '7 days')::int as devices_active_7d
     `);
     const { rows: series } = await this.db.query(`
       with days as (
@@ -42,7 +46,8 @@ export class AdminService {
       select to_char(d.day, 'YYYY-MM-DD') as day,
         (select count(*) from users u where (u.created_at at time zone 'Asia/Ho_Chi_Minh')::date = d.day)::int as signups,
         (select count(*) from documents x where (x.created_at at time zone 'Asia/Ho_Chi_Minh')::date = d.day)::int as documents,
-        (select coalesce(sum(o.amount_vnd), 0) from orders o where o.status = 'paid' and (o.paid_at at time zone 'Asia/Ho_Chi_Minh')::date = d.day)::bigint as revenue
+        (select coalesce(sum(o.amount_vnd), 0) from orders o where o.status = 'paid' and (o.paid_at at time zone 'Asia/Ho_Chi_Minh')::date = d.day)::bigint as revenue,
+        (select count(*) from devices v where (v.first_seen at time zone 'Asia/Ho_Chi_Minh')::date = d.day)::int as installs
       from days d order by d.day
     `);
     const t = totals[0];
@@ -73,7 +78,9 @@ export class AdminService {
     const { rows } = await this.db.query(
       `select u.*,
          (select count(*) from documents d where d.user_id = u.id)::int as document_count,
-         (select coalesce(sum(file_size), 0) from documents d where d.user_id = u.id)::bigint as storage_bytes
+         (select coalesce(sum(file_size), 0) from documents d where d.user_id = u.id)::bigint as storage_bytes,
+         (select count(*) from devices v where v.user_id = u.id)::int as device_count,
+         (select v.version_name from devices v where v.user_id = u.id order by v.last_seen desc limit 1) as app_version
        from users u ${whereSql}
        order by u.created_at desc
        limit $${params.length - 1} offset $${params.length}`,
@@ -87,6 +94,51 @@ export class AdminService {
     };
   }
 
+  /** Thiết bị đã cài app — filter: unregistered (chưa đăng ký) | registered | '' (tất cả). */
+  async listDevices(q: string, filter: string, page: number, pageSize: number): Promise<Page<any>> {
+    const where: string[] = [];
+    const params: any[] = [];
+    if (filter === 'unregistered') where.push('v.user_id is null');
+    if (filter === 'registered') where.push('v.user_id is not null');
+    if (q) {
+      params.push(`%${q.toLowerCase()}%`);
+      where.push(`(lower(v.install_id) like $${params.length} or lower(coalesce(v.model, '')) like $${params.length} or lower(coalesce(u.email, '')) like $${params.length})`);
+    }
+    const whereSql = where.length ? `where ${where.join(' and ')}` : '';
+    const { rows: countRows } = await this.db.query(
+      `select count(*)::int as n from devices v left join users u on u.id = v.user_id ${whereSql}`,
+      params,
+    );
+    params.push(pageSize, (page - 1) * pageSize);
+    const { rows } = await this.db.query(
+      `select v.*, u.email as user_email
+       from devices v left join users u on u.id = v.user_id
+       ${whereSql}
+       order by v.last_seen desc
+       limit $${params.length - 1} offset $${params.length}`,
+      params,
+    );
+    return { items: rows, total: countRows[0].n, page, pageSize };
+  }
+
+  async listAdmins() {
+    const { rows } = await this.db.query('select * from admins order by created_at');
+    return { supers: adminEmails(), admins: rows };
+  }
+
+  async addAdmin(email: string, addedBy: string) {
+    const e = email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) throw new BadRequestException('Email không hợp lệ');
+    if (adminEmails().includes(e)) throw new BadRequestException('Email này đã là quản trị viên chính');
+    await this.db.query('insert into admins (email, added_by) values ($1, $2) on conflict (email) do nothing', [e, addedBy]);
+    return this.listAdmins();
+  }
+
+  async removeAdmin(email: string) {
+    await this.db.query('delete from admins where email = $1', [email.trim().toLowerCase()]);
+    return this.listAdmins();
+  }
+
   async userDetail(id: string) {
     const { rows } = await this.db.query<UserRow>('select * from users where id = $1', [id]);
     if (!rows[0]) throw new NotFoundException('Không tìm thấy người dùng');
@@ -98,7 +150,11 @@ export class AdminService {
       'select * from orders where user_id = $1 order by created_at desc',
       [id],
     );
-    return { user: rows[0], documents, orders };
+    const { rows: devices } = await this.db.query(
+      'select * from devices where user_id = $1 order by last_seen desc',
+      [id],
+    );
+    return { user: rows[0], documents, orders, devices };
   }
 
   async setBusiness(id: string, isBusiness: boolean, expiresAt: string | null) {

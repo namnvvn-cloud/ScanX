@@ -79,7 +79,8 @@ data class ProductInfo(
 
 /** Gọi GET /app/config (công khai, không cần đăng nhập) + lưu thông tin sản phẩm để xem offline. */
 class AppConfigRepository(context: Context) {
-    private val prefs = context.applicationContext.getSharedPreferences("scanx_app_config", Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+    private val prefs = appContext.getSharedPreferences("scanx_app_config", Context.MODE_PRIVATE)
 
     fun cachedProductInfo(): ProductInfo =
         prefs.getString(KEY_PRODUCT, null)
@@ -98,6 +99,8 @@ class AppConfigRepository(context: Context) {
             if (code !in 200..299) throw BackendApiException("Lỗi HTTP $code")
             val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
             json.optJSONObject("productInfo")?.let { prefs.edit().putString(KEY_PRODUCT, it.toString()).apply() }
+            // Chính sách tính năng cho người chưa đăng nhập (admin tích chọn trên Web Admin → Tính năng).
+            json.optJSONObject("entitlements")?.let { EntitlementsStore(appContext).saveAnonymous(it) }
             val product = json.optJSONObject("productInfo")?.let { ProductInfo.fromJson(it) } ?: cachedProductInfo()
             val update = UpdateInfo.fromJson(json.optJSONObject("update") ?: JSONObject())
             return update to product

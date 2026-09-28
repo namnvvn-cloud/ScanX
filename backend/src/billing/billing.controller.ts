@@ -4,7 +4,7 @@ import { FirebaseAuthGuard, FirebaseUser } from '../auth/firebase-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { UsersService } from '../users/users.service';
 import { BillingService } from './billing.service';
-import { FEATURE_KEYS, FEATURE_LABELS, FREE_TRIALS, withEntitlements } from '../users/entitlements';
+import { EntitlementsService } from '../users/entitlements';
 
 class CheckoutDto {
   @IsString()
@@ -32,6 +32,7 @@ export class BillingController {
   constructor(
     private readonly billing: BillingService,
     private readonly users: UsersService,
+    private readonly entitlements: EntitlementsService,
   ) {}
 
   @Get('plans')
@@ -39,8 +40,8 @@ export class BillingController {
     return {
       plans: await this.billing.listPlans(),
       providers: this.billing.providers(),
-      // Bảng so sánh Free vs Business trên web — cùng nguồn với app (GET /users/me).
-      businessFeatures: FEATURE_KEYS.map((key) => ({ key, label: FEATURE_LABELS[key], freeTrials: FREE_TRIALS[key] })),
+      // Bảng so sánh Free vs Business trên web — cùng nguồn với app (chính sách admin tích chọn).
+      featureCatalog: await this.entitlements.catalog(),
     };
   }
 
@@ -48,7 +49,7 @@ export class BillingController {
   @Get('billing/me')
   async me(@CurrentUser() fbUser: FirebaseUser) {
     const user = await this.users.upsertFromFirebase(fbUser);
-    return { user: withEntitlements(user), orders: await this.billing.listOrdersForUser(user.id) };
+    return { user: await this.entitlements.withEntitlements(user), orders: await this.billing.listOrdersForUser(user.id) };
   }
 
   @UseGuards(FirebaseAuthGuard)

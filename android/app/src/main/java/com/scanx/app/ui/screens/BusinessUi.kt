@@ -38,7 +38,7 @@ private fun formatDate(ms: Long): String = SimpleDateFormat("dd/MM/yyyy", Locale
 @Composable
 fun BusinessFeatureList(entitlements: Entitlements, highlight: BusinessFeature? = null, trialsRemaining: (BusinessFeature) -> Int) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        BusinessFeature.entries.forEach { f ->
+        BusinessFeature.entries.filter { entitlements.access(it) != "off" }.forEach { f ->
             val unlocked = entitlements.hasFeature(f)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
@@ -49,7 +49,7 @@ fun BusinessFeatureList(entitlements: Entitlements, highlight: BusinessFeature? 
                 )
                 Column(Modifier.padding(start = 10.dp)) {
                     Text(
-                        entitlements.label(f),
+                        entitlements.label(f) + if (entitlements.access(f) == "free") " (miễn phí)" else "",
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = if (f == highlight) FontWeight.SemiBold else FontWeight.Normal,
                     )
@@ -86,11 +86,15 @@ fun BusinessPaywallDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Filled.WorkspacePremium, contentDescription = null) },
-        title = { Text("Tính năng ScanX Business") },
+        title = { Text(if (entitlements.access(feature) == "off") "Tính năng tạm ngừng" else "Tính năng ScanX Business") },
         text = {
             Column {
                 val trialNote = if (entitlements.trialLimit(feature) > 0) " Bạn đã dùng hết lượt dùng thử miễn phí." else ""
-                Text("«${entitlements.label(feature)}» dành cho tài khoản Business.$trialNote")
+                if (entitlements.access(feature) == "off") {
+                    Text("«${entitlements.label(feature)}» đang tạm ngừng cung cấp. Vui lòng thử lại sau.")
+                } else {
+                    Text("«${entitlements.label(feature)}» dành cho tài khoản Business.$trialNote")
+                }
                 Spacer(Modifier.height(14.dp))
                 BusinessFeatureList(entitlements, highlight = feature, trialsRemaining = trialsRemaining)
                 Spacer(Modifier.height(14.dp))
