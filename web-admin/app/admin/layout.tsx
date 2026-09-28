@@ -13,6 +13,7 @@ const NAV = [
   ['/admin/users', 'Người dùng'],
   ['/admin/orders', 'Đơn hàng'],
   ['/admin/plans', 'Gói cước'],
+  ['/admin/app', 'Ứng dụng'],
 ] as const;
 
 /** Chặn toàn bộ /admin: phải đăng nhập + email nằm trong ADMIN_EMAILS (backend kiểm tra thật qua AdminGuard). */

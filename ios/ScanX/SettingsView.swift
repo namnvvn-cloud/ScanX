@@ -76,6 +76,14 @@ struct SettingsView: View {
                 } footer: {
                     Text("Thêm lớp chữ ẩn vào PDF để tìm kiếm và copy được chữ (Việt, Anh, Hàn, Nhật, Trung). Chạy trên máy, không cần mạng.")
                 }
+
+                Section {
+                    NavigationLink {
+                        AboutView()
+                    } label: {
+                        Label("Thông tin sản phẩm", systemImage: "info.circle")
+                    }
+                }
             }
             .navigationTitle("Cài đặt")
             .onAppear { refresh.toggle() }

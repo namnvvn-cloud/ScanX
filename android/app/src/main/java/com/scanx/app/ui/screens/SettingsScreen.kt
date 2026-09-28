@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.TextFields
@@ -66,6 +67,8 @@ fun SettingsScreen(
     googleTranslateConfigured: Boolean = false,
     onGoogleTranslateClick: () -> Unit = {},
     onComingSoon: () -> Unit,
+    /** Màn "Thông tin sản phẩm" (mô tả, chức năng, nhà phát hành, liên hệ, kiểm tra cập nhật). */
+    onAboutClick: () -> Unit = {},
 ) {
     Scaffold(
         topBar = {
@@ -206,6 +209,15 @@ fun SettingsScreen(
                     subtitle = stringResource(R.string.settings_upgrade_plus_desc),
                     locked = true,
                     onClick = onComingSoon,
+                )
+            }
+            item {
+                SettingsRow(
+                    icon = Icons.Filled.Info,
+                    title = "Thông tin sản phẩm",
+                    subtitle = "Chức năng, phiên bản, nhà phát hành, liên hệ",
+                    locked = false,
+                    onClick = onAboutClick,
                 )
             }
             item {

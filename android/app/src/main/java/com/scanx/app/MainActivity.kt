@@ -59,6 +59,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.scanx.app.data.DocumentMeta
 import com.scanx.app.ui.AuthViewModel
 import com.scanx.app.ui.EntitlementsViewModel
+import com.scanx.app.ui.AppConfigViewModel
+import com.scanx.app.ui.screens.AboutScreen
+import com.scanx.app.ui.screens.UpdateDialog
 import com.scanx.app.ui.FeatureAccess
 import com.scanx.app.data.BusinessFeature
 import com.scanx.app.ui.screens.BusinessPaywallDialog
@@ -92,6 +95,8 @@ private sealed class Screen {
     data class Detail(val documentId: String) : Screen()
     /** Bản 1.0: "Chụp để dịch" (kiểu Google Dịch). */
     data object Translate : Screen()
+    /** Thông tin sản phẩm (mô tả, chức năng, nhà phát hành, liên hệ, kiểm tra cập nhật). */
+    data object About : Screen()
 }
 
 /** Hộp thoại "Lưu vào máy" (Storage Access Framework) với MIME + tên file chọn lúc chạy. */
@@ -106,11 +111,20 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: ScanViewModel by viewModels()
     private val entitlementsViewModel: EntitlementsViewModel by viewModels()
+    private val appConfigViewModel: AppConfigViewModel by viewModels()
 
     override fun onResume() {
         super.onResume()
+        // Kiểm tra bản mới (nhắc / ép cập nhật) mỗi lần quay lại app.
+        appConfigViewModel.checkIfStale()
         // Người dùng có thể vừa mua gói Business trên web rồi quay lại app → cập nhật trạng thái gói.
         entitlementsViewModel.refreshIfStale()
+    }
+
+    private fun openUrl(url: String) {
+        val fixed = if (url.startsWith("http://") || url.startsWith("https://")) url else "https://$url"
+        runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(fixed))) }
+            .onFailure { Toast.makeText(this, "Không mở được liên kết", Toast.LENGTH_SHORT).show() }
     }
 
     private fun openPricing() {
@@ -327,7 +341,7 @@ class MainActivity : ComponentActivity() {
                     BackHandler(enabled = screen !is Screen.Home && screen !is Screen.Camera && screen !is Screen.Translate) {
                         when {
                             editingDetailPage != null -> { editingDetailPage = null; editingDetailTool = null }
-                            screen is Screen.ScanningSettings || screen is Screen.AdvancedSettings || screen is Screen.Account -> screen = Screen.Settings
+                            screen is Screen.ScanningSettings || screen is Screen.AdvancedSettings || screen is Screen.Account || screen is Screen.About -> screen = Screen.Settings
                             else -> screen = Screen.Home
                         }
                     }
@@ -411,6 +425,29 @@ class MainActivity : ComponentActivity() {
                                 onGoogleTranslateClick = { showGoogleTranslateSettings = true },
                                 onRecommendApp = { shareApp() },
                                 onComingSoon = { showComingSoon() },
+                                onAboutClick = { screen = Screen.About },
+                            )
+                        }
+
+                        is Screen.About -> {
+                            val productInfo by appConfigViewModel.productInfo.collectAsStateWithLifecycle()
+                            val checking by appConfigViewModel.checking.collectAsStateWithLifecycle()
+                            val checkResult by appConfigViewModel.manualResult.collectAsStateWithLifecycle()
+                            AboutScreen(
+                                info = productInfo,
+                                versionName = BuildConfig.VERSION_NAME,
+                                versionCode = BuildConfig.VERSION_CODE,
+                                checking = checking,
+                                checkResult = checkResult,
+                                onCheckUpdate = { appConfigViewModel.check(manual = true) },
+                                onOpenUrl = { url -> openUrl(url) },
+                                onEmail = { mail ->
+                                    runCatching { startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:$mail"))) }
+                                },
+                                onCall = { phone ->
+                                    runCatching { startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$phone"))) }
+                                },
+                                onBack = { screen = Screen.Settings },
                             )
                         }
 
@@ -607,6 +644,17 @@ class MainActivity : ComponentActivity() {
                                 geminiConfigured = key.isNotBlank()
                                 showGeminiSettings = false
                             },
+                        )
+                    }
+
+                    // Nhắc / ÉP cập nhật (bản bắt buộc: hộp thoại không đóng được).
+                    val pendingUpdate by appConfigViewModel.update.collectAsStateWithLifecycle()
+                    pendingUpdate?.let { info ->
+                        UpdateDialog(
+                            info = info,
+                            currentVersionName = BuildConfig.VERSION_NAME,
+                            onUpdate = { openUrl(info.downloadUrl) },
+                            onLater = { appConfigViewModel.snooze() },
                         )
                     }
 

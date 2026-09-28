@@ -67,6 +67,20 @@ final class BackendAPI {
         }
     }
 
+    /// GET /app/config — công khai (không cần đăng nhập): chính sách cập nhật + thông tin sản phẩm.
+    static func appConfig(platform: String, versionCode: Int) async throws -> [String: Any] {
+        guard let url = URL(string: "\(baseURL)/app/config?platform=\(platform)&versionCode=\(versionCode)") else {
+            throw BackendAPIError.invalidResponse
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 60
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw BackendAPIError.http((response as? HTTPURLResponse)?.statusCode ?? -1, "Không tải được cấu hình app")
+        }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+    }
+
     private func send(method: String, path: String, body: [String: Any]?) async throws -> Data {
         guard let url = URL(string: Self.baseURL + path) else { throw BackendAPIError.invalidResponse }
         var request = URLRequest(url: url)

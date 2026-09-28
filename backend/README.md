@@ -37,6 +37,19 @@ Mọi request có `Auth: ✓` cần header `Authorization: Bearer <firebase-id-t
 | POST   | `/admin/orders/:id/confirm` \| `/cancel` | admin | Xác nhận tay (chuyển khoản / IPN lỡ) hoặc huỷ đơn chờ |
 | GET/PATCH | `/admin/plans[/:id]` | admin | Sửa tên / giá / thời hạn / ẩn-hiện gói |
 
+### Cập nhật phiên bản & Thông tin sản phẩm (bảng `app_config`)
+
+| Method | Endpoint | Auth | Mô tả |
+|--------|----------|------|-------|
+| GET | `/app/config?platform=android\|ios&versionCode=N` | — | App gọi lúc mở / quay lại: `update` (bản mới nhất, bản bắt buộc, `forceUpdate`, link tải) + `productInfo` |
+| GET | `/admin/app-config` | admin | Cấu hình + bản APK mới nhất đọc từ GitHub Releases |
+| PUT | `/admin/app-config/app_version` | admin | Chính sách cập nhật Android/iOS |
+| PUT | `/admin/app-config/product_info` | admin | Mô tả, chức năng, nhà phát hành, liên hệ, link chính sách |
+
+- Android: bản mới nhất **tự lấy từ GitHub Releases** (tag `debug-build-N` do CI tạo, có file `.apk`, cache 5 phút; repo đổi bằng env `GITHUB_RELEASES_REPO`). Mặc định **ép cập nhật lên bản mới nhất** (`forceLatest`) — tắt trên Web Admin → Ứng dụng nếu chỉ muốn nhắc.
+- Khi chuyển sang Google Play: tắt "Tự lấy từ GitHub", nhập versionCode mới nhất + link Play Store.
+- Bản build tay trên máy dev (versionCode ≤ 1) không bị nhắc/ép.
+
 ### Gói Business trong app (entitlements)
 
 - Danh sách tính năng Business + lượt dùng thử nằm DUY NHẤT ở `src/users/entitlements.ts` — sửa file này rồi deploy là app Android/iOS và trang bảng giá web tự cập nhật (không cần phát hành lại app).
