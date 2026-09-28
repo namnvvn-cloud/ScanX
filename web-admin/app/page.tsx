@@ -36,7 +36,16 @@ export default function Home() {
           ))}
         </section>
       </main>
-      <footer className="border-t border-line py-6 text-center text-xs text-ink-3">© {new Date().getFullYear()} ScanX</footer>
+      <footer className="border-t border-line py-6 text-center text-xs text-ink-3">
+        © {new Date().getFullYear()} ScanX ·{' '}
+        <Link href="/privacy" className="hover:underline">
+          Chính sách quyền riêng tư
+        </Link>{' '}
+        ·{' '}
+        <Link href="/terms" className="hover:underline">
+          Điều khoản sử dụng
+        </Link>
+      </footer>
     </>
   );
 }

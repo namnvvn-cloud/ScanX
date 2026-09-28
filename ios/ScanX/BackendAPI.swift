@@ -49,8 +49,10 @@ final class BackendAPI {
         return (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] ?? []
     }
 
-    func createDocument(title: String, pageCount: Int) async throws -> [String: Any] {
-        let body: [String: Any] = ["title": title, "pageCount": pageCount, "mimeType": "application/pdf"]
+    func createDocument(title: String, pageCount: Int, fileSize: Int? = nil) async throws -> [String: Any] {
+        var body: [String: Any] = ["title": title, "pageCount": pageCount, "mimeType": "application/pdf"]
+        // Dung lượng file để Web Admin thống kê lưu trữ.
+        if let fileSize, fileSize > 0 { body["fileSize"] = fileSize }
         let data = try await send(method: "POST", path: "/documents", body: body)
         return parseObject(data)
     }

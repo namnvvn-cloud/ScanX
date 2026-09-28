@@ -124,9 +124,10 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                 documents.forEachIndexed { index, doc ->
                     _backupStatus.value = "Đang sao lưu ${index + 1}/${documents.size}: ${doc.title}"
                     try {
-                        val res = api.createDocument(doc.title, doc.pageCount)
+                        val pdf = getPdfFile(doc.id)
+                        val res = api.createDocument(doc.title, doc.pageCount, pdf.length())
                         val uploadUrl = res.getString("uploadUrl")
-                        api.uploadFile(uploadUrl, getPdfFile(doc.id))
+                        api.uploadFile(uploadUrl, pdf)
                         ok++
                     } catch (e: Exception) {
                         fail++

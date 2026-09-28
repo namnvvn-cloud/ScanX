@@ -33,7 +33,7 @@ export class AppConfigController {
   async adminGet() {
     const [appVersion, productInfo, github] = await Promise.all([
       this.config.versionConfig(),
-      this.config.productInfo(),
+      this.config.productInfoRaw(),
       this.config.latestGithubRelease(true),
     ]);
     return { appVersion, productInfo, github };

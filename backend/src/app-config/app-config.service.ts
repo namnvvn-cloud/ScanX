@@ -100,10 +100,18 @@ export class AppConfigService {
     };
   }
 
-  async productInfo(): Promise<ProductInfo> {
+  /** Đúng như admin đã nhập (ô trống giữ trống) — dùng cho Web Admin. */
+  async productInfoRaw(): Promise<ProductInfo> {
     return this.get<ProductInfo>('product_info', {
       appName: 'ScanX', tagline: '', description: '', features: [], publisher: '', website: '', email: '', phone: '', address: '', privacyUrl: '', termsUrl: '',
     });
+  }
+
+  async productInfo(): Promise<ProductInfo> {
+    const info = await this.productInfoRaw();
+    // Chưa nhập link riêng → dùng trang Chính sách / Điều khoản có sẵn trên web.
+    const web = (process.env.WEB_URL || 'https://scan-x-bice.vercel.app').replace(/\/$/, '');
+    return { ...info, privacyUrl: info.privacyUrl || `${web}/privacy`, termsUrl: info.termsUrl || `${web}/terms` };
   }
 
   /** Bản APK mới nhất do CI đăng trên GitHub Releases (tag debug-build-N, có file .apk). Cache 5 phút. */

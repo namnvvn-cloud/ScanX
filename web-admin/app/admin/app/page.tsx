@@ -245,10 +245,10 @@ export default function AppConfigPage() {
               <input className={inputClass} value={info.address} onChange={(e) => setInfo({ ...info, address: e.target.value })} />
             </Field>
           </div>
-          <Field label="Link chính sách quyền riêng tư">
+          <Field label="Link chính sách quyền riêng tư" hint="Để trống = dùng trang /privacy có sẵn trên web">
             <input className={inputClass} value={info.privacyUrl} onChange={(e) => setInfo({ ...info, privacyUrl: e.target.value })} />
           </Field>
-          <Field label="Link điều khoản sử dụng">
+          <Field label="Link điều khoản sử dụng" hint="Để trống = dùng trang /terms có sẵn trên web">
             <input className={inputClass} value={info.termsUrl} onChange={(e) => setInfo({ ...info, termsUrl: e.target.value })} />
           </Field>
         </div>

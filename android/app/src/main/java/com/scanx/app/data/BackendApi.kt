@@ -38,8 +38,10 @@ class BackendApi(private val idToken: String) {
     }
 
     /** POST /documents — tạo metadata + trả uploadUrl (presigned) để PUT file PDF thẳng lên storage. */
-    fun createDocument(title: String, pageCount: Int): JSONObject {
+    fun createDocument(title: String, pageCount: Int, fileSize: Long? = null): JSONObject {
         val body = JSONObject().put("title", title).put("pageCount", pageCount).put("mimeType", "application/pdf")
+        // Dung lượng file để Web Admin thống kê lưu trữ (trước đây luôn 0 B).
+        if (fileSize != null && fileSize > 0 && fileSize <= Int.MAX_VALUE) body.put("fileSize", fileSize.toInt())
         return JSONObject(call("POST", "/documents", body))
     }
 

@@ -88,7 +88,8 @@ final class AuthViewModel: ObservableObject {
                 var failCount = 0
                 for doc in documents {
                     do {
-                        let created = try await api.createDocument(title: doc.title, pageCount: doc.pageCount)
+                        let size = (try? doc.fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? nil
+                        let created = try await api.createDocument(title: doc.title, pageCount: doc.pageCount, fileSize: size)
                         guard let uploadURL = created["uploadUrl"] as? String else {
                             failCount += 1
                             continue
