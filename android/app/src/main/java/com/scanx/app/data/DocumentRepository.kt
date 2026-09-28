@@ -160,6 +160,20 @@ class DocumentRepository(private val context: Context) {
     }
 
     /**
+     * Thay ảnh 1 trang nhưng GIỮ lớp chữ OCR (hình học trang không đổi — vd. chèn chữ ký đè lên trang),
+     * cập nhật thời gian sửa rồi dựng lại document.pdf/thumbnail.
+     */
+    fun stampPage(id: String, pageIndex: Int, jpegBytes: ByteArray) {
+        val folder = File(rootDir, id)
+        val meta = readMeta(folder) ?: return
+        val file = getPageFiles(id).getOrNull(pageIndex) ?: return
+        file.writeBytes(jpegBytes)
+        val newMeta = meta.copy(modifiedAtEpochMillis = System.currentTimeMillis())
+        writeMeta(folder, newMeta)
+        regeneratePdfAndThumbnail(id, newMeta)
+    }
+
+    /**
      * Ghi đè ảnh master của 1 trang đã lưu (bản 0.8, sau "Cắt và xoay"/"Làm sạch") rồi dựng lại ngay
      * document.pdf/thumbnail. Xoá lớp chữ OCR của riêng trang đó (toạ độ chữ cũ không còn khớp ảnh đã
      * cắt/xoay lại) — tài liệu vẫn xem/in được bình thường, chỉ mất tìm-kiếm-chữ trên trang này cho

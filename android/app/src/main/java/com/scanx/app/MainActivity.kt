@@ -46,6 +46,10 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -97,7 +101,22 @@ private sealed class Screen {
     data object Translate : Screen()
     /** Thông tin sản phẩm (mô tả, chức năng, nhà phát hành, liên hệ, kiểm tra cập nhật). */
     data object About : Screen()
+    // Công cụ + Cài đặt mở khoá (Văn bản / Mã QR / Báo cáo chi phí / Hỗ trợ / Dịch vụ lưu trữ / Mẫu email /
+    // Quy trình / Chữ ký / Biểu tượng).
+    data class TextScan(val text: String) : Screen()
+    data object QrHistory : Screen()
+    data object ExpenseReport : Screen()
+    data object Support : Screen()
+    data object CloudFolders : Screen()
+    data object EmailTemplateSettings : Screen()
+    data object WorkflowSettings : Screen()
+    data object Signatures : Screen()
+    data object AppIcon : Screen()
+    data class SignPlacement(val documentId: String, val pageIndex: Int, val signaturePath: String) : Screen()
 }
+
+/** Mục đích của 1 lần mở bộ quét Google: tài liệu thường / lấy văn bản / sách 2 trang. */
+private enum class ScanPurpose { DOCUMENT, TEXT, BOOK }
 
 /** Hộp thoại "Lưu vào máy" (Storage Access Framework) với MIME + tên file chọn lúc chạy. */
 private class CreateDocumentContract : ActivityResultContract<Pair<String, String>, Uri?>() {
@@ -173,6 +192,15 @@ class MainActivity : ComponentActivity() {
                     var editingDetailTool by remember { mutableStateOf<PageEditTool?>(null) }
                     LaunchedEffect(screen) { editingDetailPage = null; editingDetailTool = null }
                     val prefs = remember { com.scanx.app.data.AppPreferences(context) }
+                    val tools = viewModel.tools
+                    // ToolsStore không phát Flow — tăng số này sau mỗi lần đổi để các màn đọc lại cấu hình.
+                    var toolsVersion by remember { mutableIntStateOf(0) }
+                    val smartFilter by viewModel.smartFilter.collectAsStateWithLifecycle()
+                    var scanPurpose by remember { mutableStateOf(ScanPurpose.DOCUMENT) }
+                    var qrResult by remember { mutableStateOf<String?>(null) }
+                    var signPickFor by remember { mutableStateOf<Pair<String, Int>?>(null) }
+                    val supportSending by viewModel.supportSending.collectAsStateWithLifecycle()
+                    val supportResult by viewModel.supportResult.collectAsStateWithLifecycle()
 
                     // Mục 5+6 Phase 2: tính năng Business (xuất Office, dịch tài liệu, AI Cloud, sao lưu).
                     val entitlements by entitlementsViewModel.state.collectAsStateWithLifecycle()
@@ -207,6 +235,89 @@ class MainActivity : ComponentActivity() {
                     fun translateFeatures(cloudOcr: Boolean): List<BusinessFeature> = buildList {
                         add(BusinessFeature.DOC_TRANSLATE)
                         if (cloudOcr && cloudConfigured) add(BusinessFeature.AI_HANDWRITING)
+                    }
+
+                    fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+
+                    val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+                        if (uri != null) {
+                            tools.addCloudFolder(uri)
+                            toolsVersion++
+                            toast("Đã kết nối thư mục ${com.scanx.app.data.ToolsStore.providerName(uri.toString())}")
+                        }
+                    }
+
+                    fun runWorkflowFor(docId: String, wf: com.scanx.app.data.Workflow) {
+                        val ent = entitlementsViewModel.state.value
+                        viewModel.runWorkflow(
+                            docId, wf,
+                            scanXAllowed = ent.email != null && ent.hasFeature(BusinessFeature.CLOUD_BACKUP),
+                        ) { doc -> sendEmail(doc, tools.emailTemplate) }
+                    }
+
+                    // Sau mỗi lần lưu tài liệu mới: Tự động tải lên + Quy trình tự chạy sau khi quét.
+                    androidx.compose.runtime.SideEffect {
+                        viewModel.afterSaveHook = { id ->
+                            val ent = entitlementsViewModel.state.value
+                            if (tools.autoUploadEnabled && ent.hasFeature(BusinessFeature.AUTO_UPLOAD)) {
+                                val toFolder = tools.autoUploadToFolder && tools.defaultCloudFolder != null && ent.hasFeature(BusinessFeature.CLOUD_FOLDERS)
+                                val toScanX = tools.autoUploadToScanX && ent.email != null && ent.hasFeature(BusinessFeature.CLOUD_BACKUP)
+                                if (toFolder || toScanX) viewModel.autoUpload(id, toFolder, toScanX)
+                            }
+                            tools.autoWorkflow()?.let { wf ->
+                                when (val access = entitlementsViewModel.tryUse(listOf(BusinessFeature.WORKFLOWS))) {
+                                    is FeatureAccess.Locked -> toast("Quy trình «${wf.name}» không tự chạy: cần gói Business")
+                                    is FeatureAccess.Trial -> { toast("Dùng thử Quy trình — còn ${access.remainingAfter} lượt"); runWorkflowFor(id, wf) }
+                                    is FeatureAccess.Business -> runWorkflowFor(id, wf)
+                                }
+                            }
+                        }
+                    }
+
+                    fun handleToolUris(purpose: ScanPurpose, uris: List<Uri>) {
+                        if (uris.isEmpty()) return
+                        when (purpose) {
+                            ScanPurpose.TEXT -> viewModel.recognizeUris(uris) { text -> screen = Screen.TextScan(text) }
+                            ScanPurpose.BOOK -> viewModel.saveBookScan(uris) { id -> screen = Screen.Detail(id) }
+                            ScanPurpose.DOCUMENT -> viewModel.saveGoogleScan(uris) { id -> if (screen is Screen.Home) screen = Screen.Detail(id) }
+                        }
+                    }
+
+                    // Máy không có bộ quét Google → chọn ảnh có sẵn cho công cụ Văn bản / Sách.
+                    val toolImagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+                        handleToolUris(scanPurpose, uris)
+                    }
+
+                    fun scanQr() {
+                        com.google.mlkit.vision.codescanner.GmsBarcodeScanning.getClient(context).startScan()
+                            .addOnSuccessListener { barcode ->
+                                val v = barcode.rawValue.orEmpty()
+                                if (v.isNotBlank()) {
+                                    tools.addQr(v)
+                                    toolsVersion++
+                                    qrResult = v
+                                }
+                            }
+                            .addOnFailureListener { e -> toast("Không mở được trình quét mã: ${e.message ?: ""}") }
+                    }
+
+                    fun copyText(text: String, label: String = "ScanX") {
+                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        cm.setPrimaryClip(android.content.ClipData.newPlainText(label, text))
+                        toast("Đã sao chép")
+                    }
+
+                    fun shareText(text: String) {
+                        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), getString(R.string.action_share)))
+                    }
+
+                    fun startSign(docId: String, page: Int) {
+                        val sigs = tools.signatures()
+                        when {
+                            sigs.isEmpty() -> { toast("Hãy vẽ chữ ký trước"); screen = Screen.Signatures }
+                            sigs.size == 1 -> screen = Screen.SignPlacement(docId, page, sigs[0].absolutePath)
+                            else -> signPickFor = docId to page
+                        }
                     }
 
                     LaunchedEffect(errorMessage) {
@@ -295,14 +406,15 @@ class MainActivity : ComponentActivity() {
                             null
                         }
                         val uris = scan?.pages?.mapNotNull { it.imageUri }.orEmpty()
-                        if (uris.isNotEmpty()) {
-                            viewModel.saveGoogleScan(uris) { id -> if (screen is Screen.Home) screen = Screen.Detail(id) }
-                        }
+                        val purpose = scanPurpose
+                        scanPurpose = ScanPurpose.DOCUMENT
+                        handleToolUris(purpose, uris)
                     }
 
                     // Bản 1.1 (quyết định của anh Nam): Scan tự động / Scan thủ công dùng BỘ QUÉT GOOGLE — không
                     // dùng thuật toán bắt khung tự viết. Camera ScanX chỉ còn khi chọn trong Cài đặt quét.
-                    fun launchGoogleScanner(mode: CaptureMode) {
+                    fun launchGoogleScanner(mode: CaptureMode, purpose: ScanPurpose = ScanPurpose.DOCUMENT) {
+                        scanPurpose = purpose
                         val options = GmsDocumentScannerOptions.Builder()
                             .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
                             .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
@@ -314,6 +426,12 @@ class MainActivity : ComponentActivity() {
                                 googleScanLauncher.launch(IntentSenderRequest.Builder(sender).build())
                             }
                             .addOnFailureListener { e ->
+                                if (purpose != ScanPurpose.DOCUMENT) {
+                                    // Công cụ Văn bản / Sách: không có bộ quét Google → chọn ảnh có sẵn.
+                                    toast("Không mở được bộ quét — chọn ảnh có sẵn")
+                                    toolImagePicker.launch("image/*")
+                                    return@addOnFailureListener
+                                }
                                 // Máy không có Google Play services / RAM < 1,7 GB / chưa tải được module → camera ScanX.
                                 Toast.makeText(
                                     context,
@@ -342,7 +460,10 @@ class MainActivity : ComponentActivity() {
                     BackHandler(enabled = screen !is Screen.Home && screen !is Screen.Camera && screen !is Screen.Translate) {
                         when {
                             editingDetailPage != null -> { editingDetailPage = null; editingDetailTool = null }
-                            screen is Screen.ScanningSettings || screen is Screen.AdvancedSettings || screen is Screen.Account || screen is Screen.About -> screen = Screen.Settings
+                            screen is Screen.ScanningSettings || screen is Screen.AdvancedSettings || screen is Screen.Account || screen is Screen.About ||
+                                screen is Screen.CloudFolders || screen is Screen.EmailTemplateSettings || screen is Screen.WorkflowSettings ||
+                                screen is Screen.Signatures || screen is Screen.AppIcon -> screen = Screen.Settings
+                            screen is Screen.SignPlacement -> screen = Screen.Detail((screen as Screen.SignPlacement).documentId)
                             else -> screen = Screen.Home
                         }
                     }
@@ -382,6 +503,13 @@ class MainActivity : ComponentActivity() {
                                 onComingSoon = { showComingSoon() },
                                 onConvertFiles = { convertPicker.launch(arrayOf("application/pdf", "image/*")) },
                                 onTranslateFiles = { translatePicker.launch(arrayOf("application/pdf", "image/*")) },
+                                smartFilter = smartFilter,
+                                onSmartFilterChange = viewModel::setSmartFilter,
+                                onExpenseReport = { withFeatures(listOf(BusinessFeature.EXPENSE_REPORT)) { screen = Screen.ExpenseReport } },
+                                onSupport = { viewModel.clearSupportResult(); screen = Screen.Support },
+                                onTextScan = { withFeatures(listOf(BusinessFeature.TEXT_SCAN)) { launchGoogleScanner(CaptureMode.AUTO, ScanPurpose.TEXT) } },
+                                onBookScan = { withFeatures(listOf(BusinessFeature.BOOK_SCAN)) { launchGoogleScanner(CaptureMode.AUTO, ScanPurpose.BOOK) } },
+                                onQrScan = { withFeatures(listOf(BusinessFeature.QR_SCAN)) { scanQr() } },
                             )
                         }
 
@@ -429,6 +557,17 @@ class MainActivity : ComponentActivity() {
                                 onRecommendApp = { shareApp() },
                                 onComingSoon = { showComingSoon() },
                                 onAboutClick = { screen = Screen.About },
+                                cloudFolderCount = remember(toolsVersion) { tools.cloudFolders().size },
+                                autoUploadOn = remember(toolsVersion) { tools.autoUploadEnabled },
+                                onCloudFoldersClick = { screen = Screen.CloudFolders },
+                                onEmailTemplateClick = { screen = Screen.EmailTemplateSettings },
+                                workflowCount = remember(toolsVersion) { tools.workflows().size },
+                                onWorkflowsClick = { screen = Screen.WorkflowSettings },
+                                signatureCount = remember(toolsVersion) { tools.signatures().size },
+                                onSignaturesClick = { screen = Screen.Signatures },
+                                onAppIconClick = { screen = Screen.AppIcon },
+                                isBusiness = entitlements.businessActive,
+                                onUpgradeClick = { screen = Screen.Account },
                             )
                         }
 
@@ -544,6 +683,176 @@ class MainActivity : ComponentActivity() {
                                         screen = Screen.Home
                                     },
                                     onEditPage = { pageIndex, tool -> editingDetailTool = tool; editingDetailPage = pageIndex },
+                                    onSign = { page -> withFeatures(listOf(BusinessFeature.SIGNATURES)) { startSign(document.id, page) } },
+                                    onEmail = { withFeatures(listOf(BusinessFeature.EMAIL_TEMPLATES)) { sendEmail(document, tools.emailTemplate) } },
+                                    onSaveToCloudFolder = {
+                                        withFeatures(listOf(BusinessFeature.CLOUD_FOLDERS)) {
+                                            if (tools.defaultCloudFolder == null) {
+                                                toast("Chưa kết nối thư mục đám mây")
+                                                screen = Screen.CloudFolders
+                                            } else {
+                                                viewModel.saveToCloudFolder(document.id)
+                                            }
+                                        }
+                                    },
+                                    workflows = remember(toolsVersion) { tools.workflows() },
+                                    onRunWorkflow = { wf -> withFeatures(listOf(BusinessFeature.WORKFLOWS)) { runWorkflowFor(document.id, wf) } },
+                                    onManageWorkflows = { screen = Screen.WorkflowSettings },
+                                )
+                            }
+                        }
+
+                        is Screen.TextScan -> {
+                            com.scanx.app.ui.screens.TextScanScreen(
+                                initialText = current.text,
+                                onBack = { screen = Screen.Home },
+                                onCopy = { copyText(it) },
+                                onShare = { shareText(it) },
+                                onSaveTxt = { text ->
+                                    val dir = File(cacheDir, "exports").apply { mkdirs() }
+                                    val stamp = java.text.SimpleDateFormat("yyyy-MM-dd_HHmm", java.util.Locale.US).format(java.util.Date())
+                                    val f = File(dir, "${stamp}_van-ban.txt").apply { writeText(text) }
+                                    pendingSave = f
+                                    saveLauncher.launch(f.name to "text/plain")
+                                },
+                            )
+                        }
+
+                        is Screen.QrHistory -> {
+                            com.scanx.app.ui.screens.QrHistoryScreen(
+                                history = remember(toolsVersion) { tools.qrHistory() },
+                                onBack = { screen = Screen.Home },
+                                onScan = { scanQr() },
+                                onItem = { qrResult = it },
+                                onClear = { tools.clearQr(); toolsVersion++ },
+                            )
+                        }
+
+                        is Screen.ExpenseReport -> {
+                            val items = remember(documents) { viewModel.expenseCandidates() }
+                            com.scanx.app.ui.screens.ExpenseReportScreen(
+                                initialItems = items,
+                                titles = documents.associate { it.id to it.title },
+                                onBack = { screen = Screen.Home },
+                                onExport = { rows ->
+                                    if (rows.isEmpty()) {
+                                        toast("Chưa chọn hoá đơn nào")
+                                    } else {
+                                        val f = viewModel.writeExpenseCsv(rows)
+                                        pendingSave = f
+                                        saveLauncher.launch(f.name to "text/csv")
+                                    }
+                                },
+                            )
+                        }
+
+                        is Screen.Support -> {
+                            val productInfo by appConfigViewModel.productInfo.collectAsStateWithLifecycle()
+                            com.scanx.app.ui.screens.SupportScreen(
+                                defaultEmail = entitlements.email,
+                                isBusiness = entitlements.businessActive,
+                                info = productInfo,
+                                sending = supportSending,
+                                result = supportResult,
+                                onSend = { subject, message, email -> viewModel.sendSupportTicket(subject, message, email) },
+                                onEmail = { mail -> runCatching { startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:$mail"))) } },
+                                onCall = { phone -> runCatching { startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$phone"))) } },
+                                onBack = { screen = Screen.Home },
+                            )
+                        }
+
+                        is Screen.CloudFolders -> {
+                            val v = toolsVersion
+                            com.scanx.app.ui.screens.CloudFoldersScreen(
+                                folders = remember(v) { tools.cloudFolders() },
+                                defaultUri = remember(v) { tools.defaultCloudFolder },
+                                autoUpload = remember(v) { tools.autoUploadEnabled },
+                                autoToFolder = remember(v) { tools.autoUploadToFolder },
+                                autoToScanX = remember(v) { tools.autoUploadToScanX },
+                                autoUploadAllowed = entitlements.hasFeature(BusinessFeature.AUTO_UPLOAD),
+                                scanXReady = entitlements.email != null && entitlements.hasFeature(BusinessFeature.CLOUD_BACKUP),
+                                onAdd = { withFeatures(listOf(BusinessFeature.CLOUD_FOLDERS)) { runCatching { folderPicker.launch(null) } } },
+                                onRemove = { tools.removeCloudFolder(it); toolsVersion++ },
+                                onSetDefault = { tools.defaultCloudFolder = it; toolsVersion++ },
+                                onAutoUpload = { on ->
+                                    if (!on) {
+                                        tools.autoUploadEnabled = false; toolsVersion++
+                                    } else if (entitlements.hasFeature(BusinessFeature.AUTO_UPLOAD)) {
+                                        tools.autoUploadEnabled = true; toolsVersion++
+                                    } else {
+                                        paywallFeature = BusinessFeature.AUTO_UPLOAD
+                                    }
+                                },
+                                onAutoToFolder = { tools.autoUploadToFolder = it; toolsVersion++ },
+                                onAutoToScanX = { tools.autoUploadToScanX = it; toolsVersion++ },
+                                onBack = { screen = Screen.Settings },
+                            )
+                        }
+
+                        is Screen.EmailTemplateSettings -> {
+                            com.scanx.app.ui.screens.EmailTemplateScreen(
+                                template = remember(toolsVersion) { tools.emailTemplate },
+                                onSave = { tools.emailTemplate = it; toolsVersion++ },
+                                onBack = { screen = Screen.Settings },
+                            )
+                        }
+
+                        is Screen.WorkflowSettings -> {
+                            com.scanx.app.ui.screens.WorkflowsScreen(
+                                workflows = remember(toolsVersion) { tools.workflows() },
+                                folders = folders,
+                                hasCloudFolder = remember(toolsVersion) { tools.cloudFolders().isNotEmpty() },
+                                allowed = entitlements.hasFeature(BusinessFeature.WORKFLOWS),
+                                onSave = { tools.saveWorkflow(it); toolsVersion++ },
+                                onDelete = { tools.deleteWorkflow(it); toolsVersion++ },
+                                onBack = { screen = Screen.Settings },
+                            )
+                        }
+
+                        is Screen.Signatures -> {
+                            com.scanx.app.ui.screens.SignaturesScreen(
+                                signatures = remember(toolsVersion) { tools.signatures() },
+                                onAdd = { bmp -> tools.saveSignature(bmp); bmp.recycle(); toolsVersion++ },
+                                onDelete = { tools.deleteSignature(it); toolsVersion++ },
+                                onBack = { screen = Screen.Settings },
+                            )
+                        }
+
+                        is Screen.AppIcon -> {
+                            var currentIcon by remember { mutableStateOf(com.scanx.app.data.AppIconManager.current(context)) }
+                            com.scanx.app.ui.screens.AppIconScreen(
+                                current = currentIcon,
+                                onSelect = { alias ->
+                                    if (alias != currentIcon) {
+                                        runCatching { com.scanx.app.data.AppIconManager.set(context, alias) }
+                                            .onSuccess { currentIcon = alias; toast("Đã đổi biểu tượng") }
+                                            .onFailure { toast("Không đổi được biểu tượng: ${it.message}") }
+                                    }
+                                },
+                                onBack = { screen = Screen.Settings },
+                            )
+                        }
+
+                        is Screen.SignPlacement -> {
+                            val page by androidx.compose.runtime.produceState<android.graphics.Bitmap?>(null, current) {
+                                value = viewModel.loadPagePreview(current.documentId, current.pageIndex)
+                            }
+                            val sig = remember(current.signaturePath) { android.graphics.BitmapFactory.decodeFile(current.signaturePath) }
+                            val pg = page
+                            if (pg == null || sig == null) {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                            } else {
+                                com.scanx.app.ui.screens.SignPlacementScreen(
+                                    page = pg,
+                                    signature = sig,
+                                    pageLabel = "Trang ${current.pageIndex + 1}",
+                                    onApply = { x, y, w ->
+                                        viewModel.applySignature(current.documentId, current.pageIndex, File(current.signaturePath), x, y, w) {
+                                            toast("Đã chèn chữ ký")
+                                            screen = Screen.Detail(current.documentId)
+                                        }
+                                    },
+                                    onBack = { screen = Screen.Detail(current.documentId) },
                                 )
                             }
                         }
@@ -609,6 +918,45 @@ class MainActivity : ComponentActivity() {
                                     viewModel.translateFiles(uris, engine, cloudOcr, bilingual, output) { file -> convertedFile = file to output }
                                 }
                             },
+                        )
+                    }
+
+                    qrResult?.let { v ->
+                        com.scanx.app.ui.screens.QrResultDialog(
+                            value = v,
+                            onOpen = { value ->
+                                runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(value))) }
+                                    .onFailure { toast("Không mở được") }
+                            },
+                            onCopy = { copyText(it) },
+                            onShare = { shareText(it) },
+                            onHistory = { qrResult = null; screen = Screen.QrHistory },
+                            onDismiss = { qrResult = null },
+                        )
+                    }
+
+                    signPickFor?.let { (docId, page) ->
+                        val sigs = remember(toolsVersion) { tools.signatures() }
+                        AlertDialog(
+                            onDismissRequest = { signPickFor = null },
+                            title = { Text("Chọn chữ ký") },
+                            text = {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    sigs.forEach { f ->
+                                        val bmp = remember(f.path) { android.graphics.BitmapFactory.decodeFile(f.absolutePath) }
+                                        Box(
+                                            Modifier.fillMaxWidth().background(Color.White).clickable {
+                                                signPickFor = null
+                                                screen = Screen.SignPlacement(docId, page, f.absolutePath)
+                                            }.padding(8.dp),
+                                        ) {
+                                            if (bmp != null) androidx.compose.foundation.Image(bmp.asImageBitmap(), contentDescription = "Chữ ký", modifier = Modifier.height(56.dp))
+                                        }
+                                    }
+                                }
+                            },
+                            confirmButton = { TextButton(onClick = { signPickFor = null; screen = Screen.Signatures }) { Text("Quản lý chữ ký") } },
+                            dismissButton = { TextButton(onClick = { signPickFor = null }) { Text(getString(R.string.action_cancel)) } },
                         )
                     }
 
@@ -707,6 +1055,34 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    /** Gửi email theo Mẫu email (Cài đặt) kèm PDF — mở app email của máy (Gmail, Outlook…). */
+    private fun sendEmail(doc: DocumentMeta, template: com.scanx.app.data.EmailTemplate) {
+        val src = viewModel.getPdfFile(doc.id)
+        if (!src.exists()) {
+            Toast.makeText(this, "Không tìm thấy file PDF", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val dir = File(cacheDir, "share").apply { mkdirs() }
+        val out = File(dir, com.scanx.app.data.ToolsStore.safeFileName(doc.title) + ".pdf")
+        runCatching { src.copyTo(out, overwrite = true) }
+        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", if (out.exists()) out else src)
+        val to = template.to.split(',', ';').map { it.trim() }.filter { it.isNotBlank() }.toTypedArray()
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "application/pdf"
+            if (to.isNotEmpty()) putExtra(Intent.EXTRA_EMAIL, to)
+            putExtra(Intent.EXTRA_SUBJECT, com.scanx.app.data.ToolsStore.render(template.subject, doc))
+            putExtra(Intent.EXTRA_TEXT, com.scanx.app.data.ToolsStore.render(template.body, doc))
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        // Chỉ hiện app email (selector mailto:); máy không hỗ trợ selector → bảng chia sẻ thường.
+        val emailOnly = Intent(send).apply { selector = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:")) }
+        runCatching { startActivity(emailOnly) }.onFailure {
+            runCatching { startActivity(Intent.createChooser(send, "Gửi email")) }
+                .onFailure { Toast.makeText(this, "Không có app email nào", Toast.LENGTH_SHORT).show() }
         }
     }
 

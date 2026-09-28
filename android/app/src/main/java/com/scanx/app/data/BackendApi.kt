@@ -65,12 +65,15 @@ class BackendApi(private val idToken: String) {
         }
     }
 
+    /** POST /support/tickets — gửi yêu cầu hỗ trợ (có token → gắn tài khoản; Business → ưu tiên). */
+    fun createSupportTicket(body: JSONObject): JSONObject = JSONObject(call("POST", "/support/tickets", body))
+
     private fun call(method: String, path: String, body: JSONObject?): String {
         val conn = (URL(BASE_URL + path).openConnection() as HttpURLConnection).apply {
             requestMethod = method
             connectTimeout = CONNECT_TIMEOUT_MS
             readTimeout = READ_TIMEOUT_MS
-            setRequestProperty("Authorization", "Bearer $idToken")
+            if (idToken.isNotBlank()) setRequestProperty("Authorization", "Bearer $idToken")
             setRequestProperty("Content-Type", "application/json")
             if (body != null) doOutput = true
         }

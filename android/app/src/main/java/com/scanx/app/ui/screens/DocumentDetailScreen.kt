@@ -23,6 +23,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.filled.AutoFixHigh
+import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.Draw
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.NavigationBar
@@ -113,7 +120,19 @@ fun DocumentDetailScreen(
     /** Mở màn "Chỉnh sửa trang" (Bộ lọc/Cắt xoay/Làm sạch) cho trang [pageIndex]; [tool] = công cụ mở
      *  sẵn (bản 0.9, bấm từ thanh dưới), null = mở màn với thanh 3 công cụ. */
     onEditPage: (pageIndex: Int, tool: PageEditTool?) -> Unit = { _, _ -> },
+    /** Chèn chữ ký vào trang [pageIndex]. */
+    onSign: (pageIndex: Int) -> Unit = {},
+    /** Gửi email theo Mẫu email (kèm PDF). */
+    onEmail: () -> Unit = {},
+    /** Lưu PDF vào thư mục đám mây đã kết nối. */
+    onSaveToCloudFolder: () -> Unit = {},
+    /** Danh sách quy trình (tên) để chạy trên tài liệu này. */
+    workflows: List<com.scanx.app.data.Workflow> = emptyList(),
+    onRunWorkflow: (com.scanx.app.data.Workflow) -> Unit = {},
+    onManageWorkflows: () -> Unit = {},
 ) {
+    var showMenu by remember { mutableStateOf(false) }
+    var showWorkflowPicker by remember { mutableStateOf(false) }
     var showTranslate by remember { mutableStateOf(false) }
     val docMode = PdfExportMode.fromCode(document.pdfMode)
     var showDeleteDialog by remember { mutableStateOf(false) }
@@ -150,8 +169,33 @@ fun DocumentDetailScreen(
                     IconButton(onClick = { showExportSheet = true }) {
                         Icon(Icons.Filled.FileDownload, contentDescription = stringResource(R.string.export_title))
                     }
-                    IconButton(onClick = { showDeleteDialog = true }) {
-                        Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.action_delete))
+                    Box {
+                        IconButton(onClick = { showMenu = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "Thêm")
+                        }
+                        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("Gửi email") },
+                                leadingIcon = { Icon(Icons.Filled.Email, contentDescription = null) },
+                                onClick = { showMenu = false; onEmail() },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Lưu vào thư mục đám mây") },
+                                leadingIcon = { Icon(Icons.Filled.CloudUpload, contentDescription = null) },
+                                onClick = { showMenu = false; onSaveToCloudFolder() },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Chạy quy trình") },
+                                leadingIcon = { Icon(Icons.Filled.PlayArrow, contentDescription = null) },
+                                onClick = { showMenu = false; if (workflows.isEmpty()) onManageWorkflows() else showWorkflowPicker = true },
+                            )
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.action_delete)) },
+                                leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
+                                onClick = { showMenu = false; showDeleteDialog = true },
+                            )
+                        }
                     }
                 }
             )
@@ -187,6 +231,12 @@ fun DocumentDetailScreen(
                             onClick = { onEditPage(page, PageEditTool.CLEANUP) },
                             icon = { Icon(Icons.Filled.AutoFixHigh, contentDescription = null) },
                             label = { Text(stringResource(R.string.detail_tool_clean)) },
+                        )
+                        NavigationBarItem(
+                            selected = false,
+                            onClick = { onSign(page) },
+                            icon = { Icon(Icons.Filled.Draw, contentDescription = null) },
+                            label = { Text("Ký") },
                         )
                     }
                 }
@@ -238,6 +288,24 @@ fun DocumentDetailScreen(
             onOpenCloudSettings = { showTranslate = false; onOpenCloudSettings() },
             onOpenGeminiSettings = { showTranslate = false; onOpenGeminiSettings() },
             onConfirm = { engine, cloudOcr, bilingual, output, share -> showTranslate = false; onTranslate(engine, cloudOcr, bilingual, output, share) },
+        )
+    }
+
+    if (showWorkflowPicker) {
+        AlertDialog(
+            onDismissRequest = { showWorkflowPicker = false },
+            title = { Text("Chạy quy trình") },
+            text = {
+                Column {
+                    workflows.forEach { w ->
+                        TextButton(onClick = { showWorkflowPicker = false; onRunWorkflow(w) }, modifier = Modifier.fillMaxWidth()) {
+                            Text("${w.name} · ${w.stepCount} bước", modifier = Modifier.fillMaxWidth())
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showWorkflowPicker = false; onManageWorkflows() }) { Text("Quản lý quy trình") } },
+            dismissButton = { TextButton(onClick = { showWorkflowPicker = false }) { Text(stringResource(R.string.action_cancel)) } },
         )
     }
 

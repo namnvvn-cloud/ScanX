@@ -86,8 +86,8 @@
     <string name="settings_workflows">Quy trình tự động</string>
     <string name="settings_signatures">Chữ ký</string>
     <string name="settings_app_icon">Biểu tượng ứng dụng</string>
-    <string name="settings_upgrade_plus">Nâng cấp lên ScanX Plus</string>
-    <string name="settings_upgrade_plus_desc">Mở khoá toàn bộ tính năng cao cấp</string>
+    <string name="settings_upgrade_plus">Nâng cấp lên ScanX Business</string>
+    <string name="settings_upgrade_plus_desc">Mở khoá Word/Excel, dịch tài liệu, quy trình, báo cáo chi phí…</string>
     <string name="settings_recommend_app">Giới thiệu ứng dụng</string>
     <string name="settings_version">Phiên bản %1$s</string>
 

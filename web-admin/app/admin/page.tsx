@@ -22,6 +22,7 @@ interface Stats {
     devices: number;
     devices_unregistered: number;
     devices_active_7d: number;
+    support_open?: number;
   };
   series: { day: string; signups: number; documents: number; revenue: number; installs: number }[];
 }
@@ -67,6 +68,7 @@ export default function AdminDashboard() {
         <Tile label="Dung lượng lưu trữ" value={bytes(t.storage_bytes)} />
         <Tile label="Đơn đã thanh toán" value={num(t.orders_paid)} href="/admin/orders?status=paid" />
         <Tile label="Đơn chờ thanh toán" value={num(t.orders_pending)} href="/admin/orders?status=pending" />
+        <Tile label="Yêu cầu hỗ trợ đang mở" value={num(t.support_open ?? 0)} href="/admin/support" />
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
         <DailyBars title="Lượt cài mới" data={data.series.map((s) => ({ day: s.day, value: s.installs ?? 0 }))} format={num} />

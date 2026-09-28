@@ -89,6 +89,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.scanx.app.R
+import com.scanx.app.data.SmartFilter
+import androidx.compose.material.icons.filled.Check
 import com.scanx.app.data.DocumentMeta
 import com.scanx.app.data.FolderMeta
 import com.scanx.app.data.SortOrder
@@ -102,7 +104,7 @@ import java.util.Locale
 
 /**
  * Màn hình chính "My Scans" — tham khảo bố cục Scanner Pro: thanh tìm kiếm, Bộ lọc thông minh
- * (khoá "Sắp ra mắt" ở Phase 1), danh sách thư mục, lưới/danh sách tài liệu, thanh dưới cùng gồm
+ * (chip: 7 ngày qua / Có văn bản / Hoá đơn / Nhiều trang), danh sách thư mục, lưới/danh sách tài liệu, thanh dưới cùng gồm
  * Công cụ (4 ô vuông) / Camera (giữa, nổi bật) / Mở ảnh có sẵn.
  */
 @Composable
@@ -134,6 +136,13 @@ fun HomeScreen(
     onComingSoon: () -> Unit,
     onConvertFiles: () -> Unit = {},
     onTranslateFiles: () -> Unit = {},
+    smartFilter: SmartFilter = SmartFilter.ALL,
+    onSmartFilterChange: (SmartFilter) -> Unit = {},
+    onExpenseReport: () -> Unit = {},
+    onSupport: () -> Unit = {},
+    onTextScan: () -> Unit = {},
+    onBookScan: () -> Unit = {},
+    onQrScan: () -> Unit = {},
 ) {
     var showCaptureSheet by remember { mutableStateOf(false) }
     var selectMode by rememberSaveable { mutableStateOf(false) }
@@ -209,8 +218,7 @@ fun HomeScreen(
                                 DropdownMenuItem(
                                     text = { Text(stringResource(R.string.menu_expense_report)) },
                                     leadingIcon = { Icon(Icons.Filled.Receipt, contentDescription = null) },
-                                    trailingIcon = { LockedBadge() },
-                                    onClick = { showMoreMenu = false; onComingSoon() },
+                                    onClick = { showMoreMenu = false; onExpenseReport() },
                                 )
                                 DropdownMenuItem(
                                     text = {
@@ -238,8 +246,7 @@ fun HomeScreen(
                                 DropdownMenuItem(
                                     text = { Text(stringResource(R.string.menu_priority_support)) },
                                     leadingIcon = { Icon(Icons.Filled.SupportAgent, contentDescription = null) },
-                                    trailingIcon = { LockedBadge() },
-                                    onClick = { showMoreMenu = false; onComingSoon() },
+                                    onClick = { showMoreMenu = false; onSupport() },
                                 )
                                 DropdownMenuItem(
                                     text = { Text(stringResource(R.string.menu_trash_bin)) },
@@ -277,7 +284,7 @@ fun HomeScreen(
             Column(modifier = Modifier.fillMaxSize()) {
                 if (!selectMode) {
                     SearchBar(query = searchQuery, onQueryChange = onSearchQueryChange)
-                    SmartFiltersRow(onClick = onComingSoon)
+                    SmartFiltersRow(selected = smartFilter, onSelect = onSmartFilterChange)
                     FoldersRow(
                         folders = folders,
                         currentFolderId = currentFolderId,
@@ -288,7 +295,7 @@ fun HomeScreen(
                 }
 
                 if (documents.isEmpty() && !isProcessing) {
-                    EmptyState(hasQuery = searchQuery.isNotBlank(), hasFolder = currentFolderId != null)
+                    EmptyState(hasQuery = searchQuery.isNotBlank() || smartFilter != SmartFilter.ALL, hasFolder = currentFolderId != null)
                 } else if (viewMode == ViewMode.GRID) {
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(2),
@@ -362,7 +369,9 @@ fun HomeScreen(
             onDocumentClick = { showToolsSheet = false; onScanAuto() },
             onConvertClick = { showToolsSheet = false; onConvertFiles() },
             onTranslateClick = { showToolsSheet = false; onTranslateFiles() },
-            onComingSoon = { showToolsSheet = false; onComingSoon() },
+            onTextClick = { showToolsSheet = false; onTextScan() },
+            onBookClick = { showToolsSheet = false; onBookScan() },
+            onQrClick = { showToolsSheet = false; onQrScan() },
         )
     }
 
@@ -453,14 +462,19 @@ private fun SearchBar(query: String, onQueryChange: (String) -> Unit) {
 }
 
 @Composable
-private fun SmartFiltersRow(onClick: () -> Unit) {
-    Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-        AssistChip(
-            onClick = onClick,
-            label = { Text(stringResource(R.string.home_smart_filters)) },
-            trailingIcon = { LockedBadge() },
-            colors = AssistChipDefaults.assistChipColors(),
-        )
+private fun SmartFiltersRow(selected: SmartFilter, onSelect: (SmartFilter) -> Unit) {
+    LazyRow(
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(SmartFilter.entries.toList()) { f ->
+            FilterChip(
+                selected = f == selected,
+                onClick = { onSelect(if (f == selected) SmartFilter.ALL else f) },
+                label = { Text(f.label) },
+                leadingIcon = if (f == selected) ({ Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }) else null,
+            )
+        }
     }
 }
 
@@ -707,7 +721,9 @@ private fun ToolsBottomSheet(
     onDocumentClick: () -> Unit,
     onConvertClick: () -> Unit,
     onTranslateClick: () -> Unit,
-    onComingSoon: () -> Unit,
+    onTextClick: () -> Unit,
+    onBookClick: () -> Unit,
+    onQrClick: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState()
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
@@ -722,9 +738,9 @@ private fun ToolsBottomSheet(
                 horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
                 ToolItem(Icons.Filled.Description, stringResource(R.string.tools_document), locked = false, onClick = onDocumentClick)
-                ToolItem(Icons.Filled.TextFields, stringResource(R.string.tools_text), locked = true, onClick = onComingSoon)
-                ToolItem(Icons.Filled.MenuBook, stringResource(R.string.tools_book), locked = true, onClick = onComingSoon)
-                ToolItem(Icons.Filled.QrCodeScanner, stringResource(R.string.tools_qr_code), locked = true, onClick = onComingSoon)
+                ToolItem(Icons.Filled.TextFields, stringResource(R.string.tools_text), locked = false, onClick = onTextClick)
+                ToolItem(Icons.Filled.MenuBook, stringResource(R.string.tools_book), locked = false, onClick = onBookClick)
+                ToolItem(Icons.Filled.QrCodeScanner, stringResource(R.string.tools_qr_code), locked = false, onClick = onQrClick)
             }
             Text(
                 stringResource(R.string.tools_convert_section),

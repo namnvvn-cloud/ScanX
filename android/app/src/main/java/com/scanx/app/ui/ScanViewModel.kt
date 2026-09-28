@@ -26,6 +26,13 @@ import com.scanx.app.convert.TranslationChoice
 import com.scanx.app.convert.TranslationEngine
 import com.scanx.app.convert.ExportManager
 import com.scanx.app.data.AppPreferences
+import com.scanx.app.data.BackendApi
+import com.scanx.app.data.BookSplitter
+import com.scanx.app.data.ExpenseItem
+import com.scanx.app.data.ReceiptParser
+import com.scanx.app.data.SmartFilter
+import com.scanx.app.data.ToolsStore
+import com.scanx.app.data.Workflow
 import com.scanx.app.data.DocumentMeta
 import com.scanx.app.data.DocumentRepository
 import com.scanx.app.data.FolderMeta
@@ -72,10 +79,27 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
     private val _currentFolderId = MutableStateFlow<String?>(null)
     val currentFolderId: StateFlow<String?> = _currentFolderId.asStateFlow()
 
+    /** Bộ lọc thông minh (chip dưới ô tìm kiếm). */
+    private val _smartFilter = MutableStateFlow(SmartFilter.ALL)
+    val smartFilter: StateFlow<SmartFilter> = _smartFilter.asStateFlow()
+
+    fun setSmartFilter(f: SmartFilter) {
+        _smartFilter.value = f
+    }
+
     val documents: StateFlow<List<DocumentMeta>> =
-        combine(_allDocuments, _searchQuery, _sortOrder, _currentFolderId) { docs, query, sort, folderId ->
-            filterAndSort(docs, query, sort, folderId)
+        combine(_allDocuments, _searchQuery, _sortOrder, _currentFolderId, _smartFilter) { docs, query, sort, folderId, smart ->
+            filterAndSort(docs, query, sort, folderId).filter { smart.matches(it) }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Cấu hình công cụ (thư mục đám mây, mẫu email, quy trình, chữ ký, lịch sử QR). */
+    val tools = ToolsStore(application)
+
+    /**
+     * Gọi sau MỖI lần lưu tài liệu mới từ quét/nhập ảnh (MainActivity gắn: tự động tải lên + quy trình
+     * tự chạy sau khi quét — cần kiểm tra quyền gói nên để MainActivity quyết định).
+     */
+    var afterSaveHook: ((String) -> Unit)? = null
 
     private val _trashedDocuments = MutableStateFlow<List<DocumentMeta>>(emptyList())
     val trashedDocuments: StateFlow<List<DocumentMeta>> = _trashedDocuments.asStateFlow()
@@ -310,6 +334,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                 pages.forEach { if (!it.preview.isRecycled) it.preview.recycle() }
                 refresh()
                 onSaved(meta.id)
+                afterSaveHook?.invoke(meta.id)
             } catch (e: Exception) {
                 _errorMessage.value = "Không lưu được tài liệu: ${e.message}"
             } finally {
@@ -363,6 +388,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 refresh()
                 onSaved(meta.id)
+                afterSaveHook?.invoke(meta.id)
             } catch (e: Exception) {
                 _errorMessage.value = "Không lưu được tài liệu: ${e.message}"
             } finally {
@@ -399,13 +425,14 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                 } else {
                     OcrResult("", emptyList())
                 }
-                withContext(Dispatchers.IO) {
+                val meta = withContext(Dispatchers.IO) {
                     repository.saveDocument(
                         masters = masters, ocrText = ocr.text, folderId = _currentFolderId.value,
                         textLayers = ocr.layers, pdfMode = PdfExportMode.COLOR_HQ,
                     )
                 }
                 refresh()
+                afterSaveHook?.invoke(meta.id)
             } catch (e: Exception) {
                 _errorMessage.value = "Không nhập được ảnh: ${e.message}"
             } finally {
@@ -585,6 +612,304 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
             } finally {
                 newMaster?.recycle()
                 _isProcessing.value = false
+            }
+        }
+    }
+
+    // ============================ Công cụ: Văn bản / Sách / Chữ ký ============================
+
+    /** Chép ảnh từ URI (quyền đọc tạm thời) vào cache — trả danh sách file JPG. */
+    private suspend fun copyUrisToCache(uris: List<Uri>, prefix: String): List<File> = withContext(Dispatchers.IO) {
+        val context = getApplication<Application>()
+        val dir = File(context.cacheDir, "tool_session").apply { mkdirs() }
+        val stamp = System.currentTimeMillis()
+        uris.mapIndexedNotNull { i, uri ->
+            runCatching {
+                val f = File(dir, "${prefix}_${stamp}_$i.jpg")
+                context.contentResolver.openInputStream(uri)?.use { input -> f.outputStream().use { input.copyTo(it) } }
+                if (f.length() > 0L) f else null
+            }.getOrNull()
+        }
+    }
+
+    /** Công cụ "Văn bản": OCR các trang vừa quét → trả văn bản (không lưu tài liệu). */
+    fun recognizeUris(uris: List<Uri>, onDone: (String) -> Unit) {
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            _exportStatus.value = "Đang nhận dạng chữ…"
+            try {
+                val files = copyUrisToCache(uris, "text")
+                val text = withContext(Dispatchers.Default) { recognizeMasters(files).text }
+                files.forEach { it.delete() }
+                if (text.isBlank()) _errorMessage.value = "Không nhận dạng được chữ nào — thử chụp rõ và đủ sáng hơn."
+                onDone(text)
+            } catch (e: Throwable) {
+                _errorMessage.value = "Nhận dạng chữ thất bại: ${e.message}"
+            } finally {
+                _exportStatus.value = null
+            }
+        }
+    }
+
+    /** Công cụ "Sách": ảnh 2 trang mở (nằm ngang) → tự tách trang trái/phải, lưu thành 1 tài liệu. */
+    fun saveBookScan(uris: List<Uri>, onSaved: (String) -> Unit = {}) {
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            _isProcessing.value = true
+            try {
+                val raw = copyUrisToCache(uris, "book")
+                val masters = withContext(Dispatchers.Default) {
+                    raw.flatMapIndexed { i, f ->
+                        val bmp = BitmapFactory.decodeFile(f.absolutePath) ?: return@flatMapIndexed emptyList<File>()
+                        val parts = BookSplitter.split(bmp)
+                        if (parts.size == 1) return@flatMapIndexed listOf(f)
+                        val out = parts.mapIndexed { j, part ->
+                            File(f.parentFile, "${f.nameWithoutExtension}_${j}.jpg").also { pf ->
+                                pf.outputStream().use { part.compress(Bitmap.CompressFormat.JPEG, 92, it) }
+                                if (part !== bmp) part.recycle()
+                            }
+                        }
+                        bmp.recycle()
+                        f.delete()
+                        out
+                    }
+                }
+                if (masters.isEmpty()) {
+                    _errorMessage.value = "Không đọc được ảnh từ bộ quét"
+                    return@launch
+                }
+                val ocr = if (prefs.autoOcrEnabled) withContext(Dispatchers.Default) { recognizeMasters(masters) } else OcrResult("", emptyList())
+                val title = "Sách " + java.text.SimpleDateFormat("dd-MM-yyyy HHmm", Locale("vi", "VN")).format(java.util.Date())
+                val meta = withContext(Dispatchers.IO) {
+                    repository.saveDocument(
+                        masters = masters, ocrText = ocr.text, folderId = _currentFolderId.value, title = title,
+                        textLayers = ocr.layers, pdfMode = PdfExportMode.COLOR_HQ,
+                        pageFilters = masters.map { PageFilter.ORIGINAL },
+                    )
+                }
+                refresh()
+                onSaved(meta.id)
+                afterSaveHook?.invoke(meta.id)
+            } catch (e: Exception) {
+                _errorMessage.value = "Không lưu được sách: ${e.message}"
+            } finally {
+                _isProcessing.value = false
+            }
+        }
+    }
+
+    /** Ảnh trang (thu nhỏ để xem) dùng cho màn đặt chữ ký. */
+    suspend fun loadPagePreview(id: String, pageIndex: Int, maxSide: Int = 1600): Bitmap? = withContext(Dispatchers.IO) {
+        val f = repository.getPageFiles(id).getOrNull(pageIndex) ?: return@withContext null
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(f.absolutePath, bounds)
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxSide) sample *= 2
+        BitmapFactory.decodeFile(f.absolutePath, BitmapFactory.Options().apply { inSampleSize = sample })
+    }
+
+    /** Chèn chữ ký [signature] lên trang [pageIndex] tại toạ độ chuẩn hoá (x, y, bề rộng w) — giữ lớp chữ OCR. */
+    fun applySignature(id: String, pageIndex: Int, signature: File, x: Float, y: Float, w: Float, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            _isProcessing.value = true
+            try {
+                val ok = withContext(Dispatchers.Default) {
+                    val pageFile = repository.getPageFiles(id).getOrNull(pageIndex) ?: return@withContext false
+                    val page = BitmapFactory.decodeFile(pageFile.absolutePath, BitmapFactory.Options().apply { inMutable = true })
+                        ?: return@withContext false
+                    val sig = BitmapFactory.decodeFile(signature.absolutePath) ?: return@withContext false
+                    val canvas = android.graphics.Canvas(page)
+                    val left = x * page.width
+                    val top = y * page.height
+                    val width = w * page.width
+                    val height = width * sig.height / sig.width.coerceAtLeast(1)
+                    canvas.drawBitmap(sig, null, android.graphics.RectF(left, top, left + width, top + height), android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG))
+                    val bytes = java.io.ByteArrayOutputStream().use { out -> page.compress(Bitmap.CompressFormat.JPEG, 92, out); out.toByteArray() }
+                    page.recycle(); sig.recycle()
+                    withContext(Dispatchers.IO) { repository.stampPage(id, pageIndex, bytes) }
+                    true
+                }
+                refresh()
+                if (ok) onDone() else _errorMessage.value = "Không chèn được chữ ký"
+            } finally {
+                _isProcessing.value = false
+            }
+        }
+    }
+
+    // ============================ Thư mục đám mây / ScanX Cloud / Quy trình ============================
+
+    private fun pdfName(doc: DocumentMeta) = ToolsStore.safeFileName(doc.title) + ".pdf"
+
+    /** Lưu PDF vào thư mục đám mây [folderUri] (mặc định = thư mục mặc định). Trả true nếu thành công. */
+    suspend fun exportToCloudFolder(id: String, folderUri: String? = tools.defaultCloudFolder): Boolean {
+        val doc = repository.getDocument(id) ?: return false
+        val uri = folderUri ?: return false
+        return withContext(Dispatchers.IO) {
+            ToolsStore.exportToFolder(getApplication(), uri, repository.getPdfFile(id), pdfName(doc), "application/pdf")
+        }
+    }
+
+    fun saveToCloudFolder(id: String) {
+        val folder = tools.defaultCloudFolder
+        if (folder == null) {
+            _errorMessage.value = "Chưa kết nối thư mục đám mây — vào Cài đặt → Thêm dịch vụ."
+            return
+        }
+        viewModelScope.launch {
+            _exportStatus.value = "Đang lưu vào ${ToolsStore.providerName(folder)}…"
+            val ok = runCatching { exportToCloudFolder(id, folder) }.getOrDefault(false)
+            _exportStatus.value = null
+            _errorMessage.value = if (ok) "Đã lưu vào ${ToolsStore.providerName(folder)}" else "Không lưu được vào thư mục đám mây (kiểm tra kết nối / đăng nhập app ${ToolsStore.providerName(folder)})"
+        }
+    }
+
+    /** Sao lưu 1 tài liệu lên ScanX Cloud (cần đăng nhập). Chạy trên luồng nền; ném lỗi nếu thất bại. */
+    private suspend fun backupToScanX(id: String) = withContext(Dispatchers.IO) {
+        val doc = repository.getDocument(id) ?: error("Không tìm thấy tài liệu")
+        val user = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser ?: error("Chưa đăng nhập")
+        val token = com.google.android.gms.tasks.Tasks.await(user.getIdToken(false))?.token ?: error("Không lấy được token")
+        val api = BackendApi(token)
+        val pdf = repository.getPdfFile(id)
+        val res = api.createDocument(doc.title, doc.pageCount, pdf.length())
+        api.uploadFile(res.getString("uploadUrl"), pdf)
+    }
+
+    /** Tự động tải lên sau khi quét: tới thư mục đám mây và/hoặc ScanX Cloud. */
+    fun autoUpload(id: String, toFolder: Boolean, toScanX: Boolean) {
+        viewModelScope.launch {
+            val done = mutableListOf<String>()
+            val failed = mutableListOf<String>()
+            if (toFolder) tools.defaultCloudFolder?.let { f ->
+                val name = ToolsStore.providerName(f)
+                if (runCatching { exportToCloudFolder(id, f) }.getOrDefault(false)) done += name else failed += name
+            }
+            if (toScanX) {
+                if (runCatching { backupToScanX(id) }.isSuccess) done += "ScanX Cloud" else failed += "ScanX Cloud"
+            }
+            if (done.isNotEmpty() || failed.isNotEmpty()) {
+                _errorMessage.value = buildString {
+                    if (done.isNotEmpty()) append("Đã tự động tải lên: ${done.joinToString()}")
+                    if (failed.isNotEmpty()) { if (isNotEmpty()) append(" · "); append("Lỗi: ${failed.joinToString()}") }
+                }
+            }
+        }
+    }
+
+    /**
+     * Chạy quy trình [wf] trên tài liệu [id]: đặt tên → chuyển thư mục → lưu thư mục đám mây → sao lưu
+     * ScanX Cloud ([scanXAllowed] = gói cho phép) → gửi email ([onEmail] chạy trên main thread).
+     */
+    fun runWorkflow(id: String, wf: Workflow, scanXAllowed: Boolean, onEmail: (DocumentMeta) -> Unit) {
+        viewModelScope.launch {
+            _exportStatus.value = "Đang chạy quy trình «${wf.name}»…"
+            val log = mutableListOf<String>()
+            try {
+                var doc = repository.getDocument(id) ?: return@launch
+                if (wf.renamePattern.isNotBlank()) {
+                    val newTitle = ToolsStore.render(wf.renamePattern, doc).trim()
+                    if (newTitle.isNotBlank()) {
+                        withContext(Dispatchers.IO) { repository.renameDocument(id, newTitle) }
+                        log += "đặt tên"
+                    }
+                }
+                if (wf.folderId != null && _folders.value.any { it.id == wf.folderId }) {
+                    withContext(Dispatchers.IO) { repository.moveToFolder(id, wf.folderId) }
+                    log += "chuyển thư mục"
+                }
+                refresh()
+                doc = repository.getDocument(id) ?: doc
+                if (wf.saveToCloudFolder) {
+                    val ok = runCatching { exportToCloudFolder(id) }.getOrDefault(false)
+                    log += if (ok) "lưu thư mục đám mây" else "lưu thư mục đám mây (LỖI)"
+                }
+                if (wf.backupScanX) {
+                    log += when {
+                        !scanXAllowed -> "sao lưu ScanX (cần Business)"
+                        runCatching { backupToScanX(id) }.isSuccess -> "sao lưu ScanX"
+                        else -> "sao lưu ScanX (LỖI)"
+                    }
+                }
+                if (wf.sendEmail) {
+                    onEmail(doc)
+                    log += "gửi email"
+                }
+                _errorMessage.value = "Quy trình «${wf.name}»: " + log.joinToString(" → ").ifBlank { "không có bước nào" }
+            } catch (e: Exception) {
+                _errorMessage.value = "Quy trình lỗi: ${e.message}"
+            } finally {
+                _exportStatus.value = null
+            }
+        }
+    }
+
+    // ============================ Báo cáo chi phí ============================
+
+    /** Hoá đơn/biên lai trong thư viện (theo chữ OCR); không có thì lấy mọi tài liệu có chữ. */
+    fun expenseCandidates(): List<ExpenseItem> {
+        val docs = _allDocuments.value.filter { !it.isTrashed && it.ocrText.isNotBlank() }
+        val receipts = docs.filter { ReceiptParser.looksLikeReceipt(it.ocrText) }.ifEmpty { docs }
+        return receipts.sortedByDescending { it.createdAtEpochMillis }.map { ReceiptParser.parse(it.id, it.title, it.ocrText) }
+    }
+
+    /** Ghi báo cáo chi phí ra CSV (UTF-8 có BOM — Excel mở đúng tiếng Việt). */
+    fun writeExpenseCsv(items: List<ExpenseItem>): File {
+        val dir = File(getApplication<Application>().cacheDir, "exports").apply { mkdirs() }
+        val stamp = java.text.SimpleDateFormat("yyyy-MM-dd_HHmm", Locale.US).format(java.util.Date())
+        val f = File(dir, "${stamp}_bao-cao-chi-phi.csv")
+        fun q(v: String) = "\"" + v.replace("\"", "\"\"") + "\""
+        val titles = _allDocuments.value.associate { it.id to it.title }
+        val sb = StringBuilder("﻿")
+        sb.append("STT,Ngày,Đơn vị bán,Số tiền (VND),Nhóm,Ghi chú,Tài liệu\r\n")
+        items.forEachIndexed { i, it ->
+            sb.append(listOf((i + 1).toString(), q(it.date), q(it.merchant), (it.amount ?: 0L).toString(), q(it.category), q(it.note), q(titles[it.documentId] ?: "")).joinToString(","))
+            sb.append("\r\n")
+        }
+        sb.append(",,${q("TỔNG CỘNG")},${items.sumOf { it.amount ?: 0L }},,,\r\n")
+        f.writeText(sb.toString(), Charsets.UTF_8)
+        return f
+    }
+
+    // ============================ Hỗ trợ ============================
+
+    private val _supportSending = MutableStateFlow(false)
+    val supportSending: StateFlow<Boolean> = _supportSending.asStateFlow()
+    private val _supportResult = MutableStateFlow<String?>(null)
+    val supportResult: StateFlow<String?> = _supportResult.asStateFlow()
+
+    fun clearSupportResult() {
+        _supportResult.value = null
+    }
+
+    /** Gửi yêu cầu hỗ trợ lên backend (đăng nhập thì gắn tài khoản; Business → ưu tiên). */
+    fun sendSupportTicket(subject: String, message: String, email: String) {
+        if (message.isBlank() || _supportSending.value) return
+        _supportSending.value = true
+        _supportResult.value = null
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val context = getApplication<Application>()
+                val token = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.let {
+                    runCatching { com.google.android.gms.tasks.Tasks.await(it.getIdToken(false))?.token }.getOrNull()
+                }.orEmpty()
+                val body = org.json.JSONObject()
+                    .put("subject", subject.trim().ifBlank { "Yêu cầu hỗ trợ" }.padEnd(3, '.').take(150))
+                    .put("message", message.trim().padEnd(5, '.').take(5000))
+                    .put("installId", com.scanx.app.data.DeviceRegistry.installId(context))
+                    .put("platform", "android")
+                    .put("appVersion", com.scanx.app.BuildConfig.VERSION_NAME)
+                    .put("device", "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} · Android ${android.os.Build.VERSION.RELEASE}".take(120))
+                if (android.util.Patterns.EMAIL_ADDRESS.matcher(email.trim()).matches()) body.put("email", email.trim().take(200))
+                val res = BackendApi(token).createSupportTicket(body)
+                _supportResult.value = if (res.optBoolean("priority")) {
+                    "✓ Đã gửi yêu cầu (ưu tiên Business). Chúng tôi sẽ phản hồi qua email sớm nhất."
+                } else {
+                    "✓ Đã gửi yêu cầu. Chúng tôi sẽ phản hồi qua email."
+                }
+            } catch (e: Exception) {
+                _supportResult.value = "Gửi thất bại: ${e.message ?: "lỗi mạng"} — thử lại hoặc gửi email trực tiếp."
+            } finally {
+                _supportSending.value = false
             }
         }
     }

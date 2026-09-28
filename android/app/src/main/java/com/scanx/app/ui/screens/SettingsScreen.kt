@@ -45,10 +45,9 @@ import com.scanx.app.BuildConfig
 import com.scanx.app.R
 
 /**
- * Màn Cài đặt tham khảo bố cục Scanner Pro: mục Dịch vụ đám mây + Cài đặt ứng dụng. Phase 1 chưa
- * có backend nên các mục cần máy chủ/thanh toán hiển thị đủ giao diện nhưng khoá "Sắp ra mắt"
- * (quyết định đã chốt với người dùng) — chỉ Nhận dạng văn bản, Quét tài liệu, Cài đặt nâng cao,
- * Giới thiệu ứng dụng là hoạt động thật ở bản này.
+ * Màn Cài đặt tham khảo bố cục Scanner Pro: Dịch vụ lưu trữ (thư mục đám mây, tự động tải lên) + Cài
+ * đặt ứng dụng (mẫu email, quy trình, chữ ký, biểu tượng) + Nâng cấp Business. Quyền từng tính năng
+ * theo chính sách admin (Web Admin → Tính năng), kiểm tra lúc dùng.
  */
 @Composable
 fun SettingsScreen(
@@ -69,6 +68,18 @@ fun SettingsScreen(
     onComingSoon: () -> Unit,
     /** Màn "Thông tin sản phẩm" (mô tả, chức năng, nhà phát hành, liên hệ, kiểm tra cập nhật). */
     onAboutClick: () -> Unit = {},
+    /** Dịch vụ lưu trữ: thư mục đám mây (Drive/OneDrive/Dropbox…) + Tự động tải lên. */
+    cloudFolderCount: Int = 0,
+    autoUploadOn: Boolean = false,
+    onCloudFoldersClick: () -> Unit = {},
+    onEmailTemplateClick: () -> Unit = {},
+    workflowCount: Int = 0,
+    onWorkflowsClick: () -> Unit = {},
+    signatureCount: Int = 0,
+    onSignaturesClick: () -> Unit = {},
+    onAppIconClick: () -> Unit = {},
+    isBusiness: Boolean = false,
+    onUpgradeClick: () -> Unit = {},
 ) {
     Scaffold(
         topBar = {
@@ -97,19 +108,18 @@ fun SettingsScreen(
                 SettingsRow(
                     icon = Icons.Filled.Cloud,
                     title = stringResource(R.string.settings_add_service),
-                    subtitle = stringResource(R.string.settings_add_service_desc),
-                    locked = true,
-                    onClick = onComingSoon,
+                    subtitle = if (cloudFolderCount > 0) "Đã kết nối $cloudFolderCount thư mục" else stringResource(R.string.settings_add_service_desc),
+                    locked = false,
+                    onClick = onCloudFoldersClick,
                 )
             }
             item {
-                SettingsSwitchRow(
+                SettingsRow(
                     icon = Icons.Filled.CloudUpload,
                     title = stringResource(R.string.settings_auto_upload),
-                    subtitle = stringResource(R.string.settings_auto_upload_desc),
-                    checked = false,
-                    locked = true,
-                    onCheckedChange = { onComingSoon() },
+                    subtitle = if (autoUploadOn) "Đang bật" else stringResource(R.string.settings_auto_upload_desc),
+                    locked = false,
+                    onClick = onCloudFoldersClick,
                 )
             }
 
@@ -172,32 +182,36 @@ fun SettingsScreen(
                 SettingsRow(
                     icon = Icons.Filled.Email,
                     title = stringResource(R.string.settings_email_template),
-                    locked = true,
-                    onClick = onComingSoon,
+                    subtitle = "Tiêu đề, nội dung, người nhận khi gửi tài liệu",
+                    locked = false,
+                    onClick = onEmailTemplateClick,
                 )
             }
             item {
                 SettingsRow(
                     icon = Icons.Filled.AccountTree,
                     title = stringResource(R.string.settings_workflows),
-                    locked = true,
-                    onClick = onComingSoon,
+                    subtitle = if (workflowCount > 0) "$workflowCount quy trình" else "Đặt tên, chuyển thư mục, tải lên, gửi email bằng 1 lần bấm",
+                    locked = false,
+                    onClick = onWorkflowsClick,
                 )
             }
             item {
                 SettingsRow(
                     icon = Icons.Filled.Edit,
                     title = stringResource(R.string.settings_signatures),
-                    locked = true,
-                    onClick = onComingSoon,
+                    subtitle = if (signatureCount > 0) "$signatureCount chữ ký đã lưu" else "Vẽ chữ ký để chèn vào tài liệu",
+                    locked = false,
+                    onClick = onSignaturesClick,
                 )
             }
             item {
                 SettingsRow(
                     icon = Icons.Filled.Brush,
                     title = stringResource(R.string.settings_app_icon),
-                    locked = true,
-                    onClick = onComingSoon,
+                    subtitle = "Đổi màu biểu tượng trên màn hình chính",
+                    locked = false,
+                    onClick = onAppIconClick,
                 )
             }
 
@@ -205,10 +219,10 @@ fun SettingsScreen(
             item {
                 SettingsRow(
                     icon = Icons.Filled.Star,
-                    title = stringResource(R.string.settings_upgrade_plus),
-                    subtitle = stringResource(R.string.settings_upgrade_plus_desc),
-                    locked = true,
-                    onClick = onComingSoon,
+                    title = if (isBusiness) "ScanX Business đang hoạt động" else stringResource(R.string.settings_upgrade_plus),
+                    subtitle = if (isBusiness) "Xem hạn gói, tính năng đã mở khoá" else stringResource(R.string.settings_upgrade_plus_desc),
+                    locked = false,
+                    onClick = onUpgradeClick,
                 )
             }
             item {

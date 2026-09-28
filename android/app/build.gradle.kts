@@ -127,6 +127,10 @@ dependencies {
     // thêm vào APK). Máy không có Google Play hoặc RAM < 1,7 GB → ScanX tự lùi về camera tự viết bên dưới.
     implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0")
 
+    // Công cụ "Mã QR": Google Code Scanner (giao diện quét do Google Play services cung cấp, không cần
+    // quyền camera, không nhúng model vào APK).
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
+
     // Bản 1.0: đọc hướng xoay EXIF của ảnh chọn từ thư viện cho "Chụp để dịch".
     implementation("androidx.exifinterface:exifinterface:1.3.7")
 

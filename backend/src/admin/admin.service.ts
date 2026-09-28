@@ -37,7 +37,8 @@ export class AdminService {
         (select coalesce(sum(amount_vnd), 0) from orders where status = 'paid' and paid_at > now() - interval '30 days')::bigint as revenue_30d,
         (select count(*) from devices)::int as devices,
         (select count(*) from devices where user_id is null)::int as devices_unregistered,
-        (select count(*) from devices where last_seen > now() - interval '7 days')::int as devices_active_7d
+        (select count(*) from devices where last_seen > now() - interval '7 days')::int as devices_active_7d,
+        (select count(*) from support_tickets where status = 'open')::int as support_open
     `);
     const { rows: series } = await this.db.query(`
       with days as (
