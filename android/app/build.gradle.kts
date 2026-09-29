@@ -26,16 +26,12 @@ android {
         buildConfigField("String", "WEB_PRICING_URL", "\"https://scan-x-bice.vercel.app/pricing\"")
         buildConfigField("boolean", "SHOW_WEB_PURCHASE", "true")
 
-        // OpenCV AAR đóng gói native lib cho mọi ABI (~110MB). Giới hạn còn 2 ABI phổ biến nhất
-        // trên điện thoại thật (bỏ x86/x86_64 chỉ dùng cho emulator) để giảm đáng kể kích thước APK.
-        ndk {
-            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
-        }
-
         // Chỉ giữ chuỗi tiếng Việt + tiếng Anh của các thư viện (Firebase, Play services… kèm ~80 ngôn ngữ).
         resourceConfigurations += listOf("vi", "en")
     }
 
+    // (Không dùng ndk.abiFilters cùng lúc với splits — AGP báo xung đột.) OpenCV/ML Kit có native lib cho
+    // mọi ABI; splits chỉ đóng 2 ABI điện thoại thật (bỏ x86/x86_64 của emulator).
     // Tách APK theo kiến trúc CPU: điện thoại 64-bit (gần như mọi máy từ 2017) chỉ tải bản arm64 (~½ dung
     // lượng native). Bản armeabi-v7a cho máy 32-bit đời cũ. Google Play (AAB) tự tách, không cần bước này.
     splits {
