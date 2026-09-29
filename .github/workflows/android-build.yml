@@ -59,6 +59,7 @@ jobs:
           ls -la ../dist
           # Thành phần lớn nhất trong APK (để theo dõi dung lượng)
           unzip -lv ../dist/ScanX.apk | sort -k3 -n -r | head -15 || true
+          echo "::notice title=APK size::ScanX.apk $(du -h ../dist/ScanX.apk | cut -f1), ScanX-armv7.apk $(du -h ../dist/ScanX-armv7.apk | cut -f1)"
 
       # Actions Artifact storage (500MB free-tier, dung chung ca tai khoan) bi chan va chi
       # duoc GitHub tinh lai sau 6-12 tieng du da don cache -> khong dung upload-artifact

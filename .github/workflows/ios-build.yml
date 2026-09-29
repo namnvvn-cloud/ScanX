@@ -56,3 +56,4 @@ jobs:
           echo "App bundle: $APP"
           du -sh "$APP"
           du -sh "$APP"/* | sort -h | tail -10
+          echo "::notice title=iOS app size (Release, arm64)::$(du -sh "$APP" | cut -f1) — $(du -sh "$APP"/Frameworks 2>/dev/null | cut -f1) frameworks"
