@@ -46,8 +46,19 @@ jobs:
             chmod +x ./gradlew
           fi
 
-      - name: Build debug APK
-        run: ./gradlew :app:assembleDebug --no-daemon
+      # Bản "preview": R8 thu gọn + tối ưu, không debuggable (mượt hơn bản debug), tách APK theo CPU.
+      # Vẫn applicationId com.scanx.app.debug + khoá ký test cố định → cài đè bản cũ, giữ tài liệu.
+      - name: Build preview APKs (arm64 + armv7)
+        run: ./gradlew :app:assemblePreview --no-daemon
+
+      - name: Rename APKs
+        run: |
+          mkdir -p ../dist
+          cp app/build/outputs/apk/preview/app-arm64-v8a-preview.apk ../dist/ScanX.apk
+          cp app/build/outputs/apk/preview/app-armeabi-v7a-preview.apk ../dist/ScanX-armv7.apk
+          ls -la ../dist
+          # Thành phần lớn nhất trong APK (để theo dõi dung lượng)
+          unzip -lv ../dist/ScanX.apk | sort -k3 -n -r | head -15 || true
 
       # Actions Artifact storage (500MB free-tier, dung chung ca tai khoan) bi chan va chi
       # duoc GitHub tinh lai sau 6-12 tieng du da don cache -> khong dung upload-artifact
@@ -57,8 +68,8 @@ jobs:
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
-          name: scanx-debug-apk
-          path: android/app/build/outputs/apk/debug/*.apk
+          name: scanx-apk
+          path: dist/*.apk
           retention-days: 5
 
       - name: Publish APK to GitHub Release
@@ -67,7 +78,8 @@ jobs:
           tag_name: debug-build-${{ github.run_number }}
           name: "ScanX debug build #${{ github.run_number }} (${{ github.sha }})"
           body: |
-            APK debug tu dong build tu commit ${{ github.sha }}.
-            Tai file .apk ben duoi, copy vao dien thoai Android de cai (bat "Cai tu nguon khong xac dinh").
+            APK tu dong build tu commit ${{ github.sha }}.
+            ScanX.apk: dien thoai 64-bit (hau het may). ScanX-armv7.apk: may 32-bit doi cu.
+            Copy vao dien thoai Android de cai (bat "Cai tu nguon khong xac dinh").
           prerelease: true
-          files: android/app/build/outputs/apk/debug/*.apk
+          files: dist/*.apk

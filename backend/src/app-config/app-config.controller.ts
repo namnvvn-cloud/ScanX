@@ -4,7 +4,7 @@ import { AppConfigService } from './app-config.service';
 import { EntitlementsService } from '../users/entitlements';
 
 /**
- * GET /app/config?platform=android|ios&versionCode=N — công khai, app gọi lúc mở:
+ * GET /app/config?platform=android|ios&versionCode=N[&abi=arm64-v8a] — công khai, app gọi lúc mở:
  *   { update: UpdateInfo, productInfo }  → nhắc / ép cập nhật + màn "Thông tin sản phẩm".
  */
 @Controller()
@@ -15,11 +15,11 @@ export class AppConfigController {
   ) {}
 
   @Get('app/config')
-  async appConfig(@Query('platform') platform = 'android', @Query('versionCode') versionCode = '0') {
+  async appConfig(@Query('platform') platform = 'android', @Query('versionCode') versionCode = '0', @Query('abi') abi = '') {
     const p = platform === 'ios' ? 'ios' : 'android';
     const current = Number.parseInt(versionCode, 10) || 0;
     const [update, productInfo, entitlements] = await Promise.all([
-      this.config.updateInfo(p, current),
+      this.config.updateInfo(p, current, String(abi).slice(0, 32)),
       this.config.productInfo(),
       this.entitlements.entitlementsFor(null),
     ]);

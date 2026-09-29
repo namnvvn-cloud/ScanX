@@ -30,6 +30,18 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: "AppIconDark AppIconGreen AppIconOrange"
         ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: YES
+        # Nhẹ + nhanh: bỏ code không dùng, tách ký hiệu debug ra dSYM (không nằm trong app).
+        DEAD_CODE_STRIPPING: YES
+      configs:
+        Release:
+          DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
+          SWIFT_OPTIMIZATION_LEVEL: "-O"
+          SWIFT_COMPILATION_MODE: wholemodule
+          GCC_OPTIMIZATION_LEVEL: s
+          STRIP_INSTALLED_PRODUCT: YES
+          STRIP_SWIFT_SYMBOLS: YES
+          COPY_PHASE_STRIP: YES
+          VALIDATE_PRODUCT: YES
     info:
       path: ScanX/Info.plist
       properties:

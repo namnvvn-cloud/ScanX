@@ -78,10 +78,10 @@
             </intent-filter>
         </activity-alias>
 
-        <!-- Tải sẵn module giao diện quét mã QR (Google Code Scanner) khi cài app từ Google Play. -->
+        <!-- Tải sẵn model ML Kit qua Google Play services (quét QR, OCR Latin/Trung/Nhật/Hàn, nhận diện ngôn ngữ) khi cài từ Google Play. Cài APK ngoài: ScanXApp yêu cầu tải khi mở app lần đầu. -->
         <meta-data
             android:name="com.google.mlkit.vision.DEPENDENCIES"
-            android:value="barcode_ui" />
+            android:value="barcode_ui,ocr,ocr_chinese,ocr_japanese,ocr_korean,langid" />
 
         <!-- FileProvider để chia sẻ PDF/ảnh đã scan ra ngoài app (chia sẻ, in, mở bằng app khác) -->
         <provider

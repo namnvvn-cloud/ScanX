@@ -293,14 +293,24 @@ struct HomeView: View {
     }
 }
 
+/// Cache ảnh thu nhỏ danh sách tài liệu (tự giải phóng khi thiếu bộ nhớ).
+enum ThumbnailCache {
+    static let shared: NSCache<NSString, UIImage> = {
+        let c = NSCache<NSString, UIImage>()
+        c.countLimit = 300
+        return c
+    }()
+}
+
 private struct DocumentRow: View {
     let meta: DocumentMeta
     let thumbnailURL: URL
+    @State private var thumbnail: UIImage?
 
     var body: some View {
         HStack(spacing: 12) {
             Group {
-                if let image = UIImage(contentsOfFile: thumbnailURL.path) {
+                if let image = thumbnail {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFill()
@@ -309,6 +319,18 @@ private struct DocumentRow: View {
                 }
             }
             .frame(width: 48, height: 64)
+            // Đọc ảnh thu nhỏ trên luồng nền + cache → cuộn danh sách không giật.
+            .task(id: "\(meta.id)#\(meta.modifiedAt.timeIntervalSince1970)") {
+                let key = "\(meta.id)#\(meta.modifiedAt.timeIntervalSince1970)" as NSString
+                if let cached = ThumbnailCache.shared.object(forKey: key) {
+                    thumbnail = cached
+                    return
+                }
+                let url = thumbnailURL
+                let image = await Task.detached(priority: .utility) { ImageLoader.downsampled(at: url, maxPixel: 192) }.value
+                if let image { ThumbnailCache.shared.setObject(image, forKey: key) }
+                thumbnail = image
+            }
             .clipShape(RoundedRectangle(cornerRadius: 4))
 
             VStack(alignment: .leading, spacing: 4) {

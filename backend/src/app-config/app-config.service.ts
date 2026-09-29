@@ -46,7 +46,10 @@ export interface ProductInfo {
 export interface GithubRelease {
   versionCode: number;
   versionName: string;
+  /** APK arm64 (mặc định, máy 64-bit). */
   downloadUrl: string;
+  /** APK armeabi-v7a cho máy 32-bit đời cũ (nếu CI có đăng). */
+  downloadUrlArmv7?: string;
   title: string;
   publishedAt: string;
 }
@@ -127,7 +130,10 @@ export class AppConfigService {
       let best: GithubRelease | null = null;
       for (const r of list) {
         const m = /^debug-build-(\d+)$/.exec(String(r?.tag_name ?? ''));
-        const apk = (r?.assets ?? []).find((a: any) => String(a?.name ?? '').endsWith('.apk') && a?.state === 'uploaded');
+        const apks = (r?.assets ?? []).filter((a: any) => String(a?.name ?? '').endsWith('.apk') && a?.state === 'uploaded');
+        // Từ build tách theo CPU: ScanX.apk (arm64) + ScanX-armv7.apk. Build cũ: 1 file app-debug.apk.
+        const apk = apks.find((a: any) => !/armv7|armeabi/i.test(String(a.name))) ?? apks[0];
+        const armv7 = apks.find((a: any) => /armv7|armeabi/i.test(String(a.name)));
         if (!m || r.draft || !apk) continue;
         const code = Number(m[1]);
         if (!best || code > best.versionCode) {
@@ -135,6 +141,7 @@ export class AppConfigService {
             versionCode: code,
             versionName: `0.2.${code}`,
             downloadUrl: apk.browser_download_url,
+            downloadUrlArmv7: armv7?.browser_download_url,
             title: String(r.name ?? ''),
             publishedAt: String(r.published_at ?? ''),
           };
@@ -149,7 +156,7 @@ export class AppConfigService {
     return this.githubCache.value;
   }
 
-  async updateInfo(platform: 'android' | 'ios', current: number): Promise<UpdateInfo> {
+  async updateInfo(platform: 'android' | 'ios', current: number, abi = ''): Promise<UpdateInfo> {
     const cfg = await this.versionConfig();
     if (platform === 'ios') {
       const p = cfg.ios;
@@ -172,7 +179,8 @@ export class AppConfigService {
     const useGithub = !!gh && gh.versionCode >= p.latestVersionCode;
     const latest = useGithub ? gh!.versionCode : p.latestVersionCode;
     const latestName = useGithub ? gh!.versionName : p.latestVersionName;
-    const downloadUrl = p.downloadUrl || (useGithub ? gh!.downloadUrl : '');
+    const ghUrl = useGithub ? (/^armeabi/i.test(abi) && gh!.downloadUrlArmv7 ? gh!.downloadUrlArmv7 : gh!.downloadUrl) : '';
+    const downloadUrl = p.downloadUrl || ghUrl;
     const required = p.forceLatest ? latest : p.minVersionCode;
     return {
       platform,

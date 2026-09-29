@@ -251,9 +251,16 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         refresh()
     }
 
+    /** Đọc lại danh sách tài liệu/thư mục trên luồng nền (không chặn giao diện). */
     fun refresh() {
-        _allDocuments.value = repository.listDocuments()
-        _folders.value = repository.listFolders()
+        viewModelScope.launch { refreshNow() }
+    }
+
+    /** Như [refresh] nhưng chờ đọc xong — dùng trong coroutine trước khi mở màn tài liệu vừa lưu. */
+    suspend fun refreshNow() {
+        val (docs, folders) = withContext(Dispatchers.IO) { repository.listDocuments() to repository.listFolders() }
+        _allDocuments.value = docs
+        _folders.value = folders
     }
 
     /** Tra tài liệu theo id trên danh sách vừa [refresh] (không qua bộ lọc thư mục/tìm kiếm) — bản 0.9,
@@ -261,7 +268,9 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
     fun documentById(id: String): DocumentMeta? = _allDocuments.value.find { it.id == id }
 
     fun refreshTrash() {
-        _trashedDocuments.value = repository.listDocuments(includeTrashed = true).filter { it.isTrashed }
+        viewModelScope.launch {
+            _trashedDocuments.value = withContext(Dispatchers.IO) { repository.listDocuments(includeTrashed = true).filter { it.isTrashed } }
+        }
     }
 
     fun clearError() {
@@ -332,7 +341,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
                 pages.forEach { if (!it.preview.isRecycled) it.preview.recycle() }
-                refresh()
+                refreshNow()
                 onSaved(meta.id)
                 afterSaveHook?.invoke(meta.id)
             } catch (e: Exception) {
@@ -386,7 +395,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                         pageFilters = masters.map { PageFilter.ORIGINAL },
                     )
                 }
-                refresh()
+                refreshNow()
                 onSaved(meta.id)
                 afterSaveHook?.invoke(meta.id)
             } catch (e: Exception) {
@@ -431,7 +440,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                         textLayers = ocr.layers, pdfMode = PdfExportMode.COLOR_HQ,
                     )
                 }
-                refresh()
+                refreshNow()
                 afterSaveHook?.invoke(meta.id)
             } catch (e: Exception) {
                 _errorMessage.value = "Không nhập được ảnh: ${e.message}"
@@ -560,7 +569,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
     fun setPageFilter(id: String, pageIndex: Int, filter: PageFilter?) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) { repository.setPageFilter(id, pageIndex, filter) }
-            refresh()
+            refreshNow()
         }
     }
 
@@ -579,7 +588,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
                 withContext(Dispatchers.IO) { repository.updatePageMaster(id, pageIndex, bytes) }
-                refresh()
+                refreshNow()
                 onDone()
             } finally {
                 newMaster.recycle()
@@ -607,7 +616,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
                 withContext(Dispatchers.IO) { repository.commitPageEdit(id, pageIndex, bytes, filter) }
-                refresh()
+                refreshNow()
                 onDone()
             } finally {
                 newMaster?.recycle()
@@ -687,7 +696,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                         pageFilters = masters.map { PageFilter.ORIGINAL },
                     )
                 }
-                refresh()
+                refreshNow()
                 onSaved(meta.id)
                 afterSaveHook?.invoke(meta.id)
             } catch (e: Exception) {
@@ -729,7 +738,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                     withContext(Dispatchers.IO) { repository.stampPage(id, pageIndex, bytes) }
                     true
                 }
-                refresh()
+                refreshNow()
                 if (ok) onDone() else _errorMessage.value = "Không chèn được chữ ký"
             } finally {
                 _isProcessing.value = false
@@ -817,7 +826,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                     withContext(Dispatchers.IO) { repository.moveToFolder(id, wf.folderId) }
                     log += "chuyển thư mục"
                 }
-                refresh()
+                refreshNow()
                 doc = repository.getDocument(id) ?: doc
                 if (wf.saveToCloudFolder) {
                     val ok = runCatching { exportToCloudFolder(id) }.getOrDefault(false)

@@ -31,6 +31,20 @@ android {
         ndk {
             abiFilters += listOf("armeabi-v7a", "arm64-v8a")
         }
+
+        // Chỉ giữ chuỗi tiếng Việt + tiếng Anh của các thư viện (Firebase, Play services… kèm ~80 ngôn ngữ).
+        resourceConfigurations += listOf("vi", "en")
+    }
+
+    // Tách APK theo kiến trúc CPU: điện thoại 64-bit (gần như mọi máy từ 2017) chỉ tải bản arm64 (~½ dung
+    // lượng native). Bản armeabi-v7a cho máy 32-bit đời cũ. Google Play (AAB) tự tách, không cần bước này.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a")
+            isUniversalApk = false
+        }
     }
 
     // Khoá ký debug CỐ ĐỊNH lưu trong repo. Trước đây máy build GitHub tự sinh khoá ngẫu nhiên mỗi
@@ -54,7 +68,19 @@ android {
         release {
             buildConfigField("boolean", "SHOW_WEB_PURCHASE", "false")
             isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+        // Bản phát hành thử (CI đăng lên GitHub Releases): tối ưu như release (R8 thu gọn + tối ưu code,
+        // bỏ tài nguyên thừa, KHÔNG debuggable → Compose chạy mượt hơn nhiều so với bản debug) nhưng giữ
+        // applicationId ".debug" + khoá ký test cố định → CÀI ĐÈ lên bản đang dùng, không mất tài liệu.
+        create("preview") {
+            initWith(getByName("release"))
+            buildConfigField("boolean", "SHOW_WEB_PURCHASE", "true")
+            applicationIdSuffix = ".debug"
+            signingConfig = signingConfigs.getByName("debug")
+            isDebuggable = false
+            matchingFallbacks += listOf("release")
         }
     }
 
@@ -82,6 +108,11 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+        // Nén thư viện native (.so) trong APK: file tải về nhỏ hơn ~50% (OpenCV, ML Kit dịch), đổi lại
+        // cài đặt giải nén 1 lần.
+        jniLibs {
+            useLegacyPackaging = true
+        }
     }
 }
 
@@ -102,16 +133,20 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.4")
 
-    // OCR on-device, hỗ trợ tiếng Việt (Latin script)
-    implementation("com.google.mlkit:text-recognition:16.0.1")
-    // OCR đa ngôn ngữ (nhúng sẵn model, chạy offline): Hàn / Nhật / Trung — tài liệu song ngữ, hợp đồng
-    // nước ngoài. Mỗi bộ cũng đọc được chữ Latin; ScanX gộp kết quả theo hệ chữ từng dòng.
-    implementation("com.google.mlkit:text-recognition-korean:16.0.1")
-    implementation("com.google.mlkit:text-recognition-japanese:16.0.1")
-    implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
-    // Nhận diện ngôn ngữ từng dòng (offline) + dịch offline (model ~30 MB/ngôn ngữ tải khi cần).
-    implementation("com.google.mlkit:language-id:17.0.6")
+    // OCR on-device (Latin/tiếng Việt + Hàn / Nhật / Trung) — bản dùng model của Google Play services
+    // (tải 1 lần, dùng chung giữa các app) thay vì nhúng model + thư viện native (~18 MB/kiến trúc) vào
+    // APK. Cùng API com.google.mlkit.vision.text.* nên code không đổi. ScanXApp yêu cầu tải sẵn khi mở app.
+    implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.1")
+    implementation("com.google.android.gms:play-services-mlkit-text-recognition-korean:16.0.1")
+    implementation("com.google.android.gms:play-services-mlkit-text-recognition-japanese:16.0.1")
+    implementation("com.google.android.gms:play-services-mlkit-text-recognition-chinese:16.0.1")
+    implementation("com.google.android.gms:play-services-base:18.5.0")
+    // Nhận diện ngôn ngữ từng dòng (model qua Google Play services) + dịch offline (model ~30 MB/ngôn
+    // ngữ tải khi cần; thư viện dịch không có bản Play services nên vẫn nhúng).
+    implementation("com.google.android.gms:play-services-mlkit-language-id:17.0.0")
     implementation("com.google.mlkit:translate:17.0.3")
+    // Cài sẵn "baseline profile" của Compose khi cài APK ngoài Google Play → mở app / cuộn danh sách mượt hơn.
+    implementation("androidx.profileinstaller:profileinstaller:1.3.1")
 
     implementation("androidx.core:core-splashscreen:1.0.1")
 

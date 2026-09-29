@@ -40,3 +40,19 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
+
+      # Bản Release cho iPhone thật (không ký) — kiểm tra cấu hình tối ưu + báo dung lượng app.
+      - name: Build Release for iOS device (size check)
+        run: |
+          xcodebuild build \
+            -project ScanX.xcodeproj \
+            -scheme ScanX \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+          APP=$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -1)
+          echo "App bundle: $APP"
+          du -sh "$APP"
+          du -sh "$APP"/* | sort -h | tail -10

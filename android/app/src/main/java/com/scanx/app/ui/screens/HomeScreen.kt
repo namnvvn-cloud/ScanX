@@ -547,11 +547,26 @@ private fun EmptyState(hasQuery: Boolean, hasFolder: Boolean) {
     }
 }
 
+/** Cache ảnh thu nhỏ (tối đa ~12 MB) — cuộn lại danh sách không phải đọc/giải mã file lần nữa. */
+private object ThumbnailCache : android.util.LruCache<String, Bitmap>(12 * 1024 * 1024) {
+    override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
+}
+
 @Composable
 private fun rememberThumbnail(file: File, docId: String): Bitmap? {
-    val state = produceState<Bitmap?>(initialValue = null, docId) {
-        value = withContext(Dispatchers.IO) {
-            runCatching { if (file.exists()) BitmapFactory.decodeFile(file.path) else null }.getOrNull()
+    // Khoá theo thời điểm sửa file → ảnh thu nhỏ tự cập nhật sau khi sửa trang đầu.
+    val key = "$docId:${file.lastModified()}"
+    val state = produceState(initialValue = ThumbnailCache.get(key), key) {
+        if (value == null) {
+            value = withContext(Dispatchers.IO) {
+                runCatching {
+                    if (file.exists()) {
+                        BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.RGB_565 })
+                    } else {
+                        null
+                    }
+                }.getOrNull()
+            }?.also { ThumbnailCache.put(key, it) }
         }
     }
     return state.value

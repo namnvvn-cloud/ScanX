@@ -89,7 +89,9 @@ class AppConfigRepository(context: Context) {
 
     /** Chạy trên luồng nền. Trả (update, productInfo); ném lỗi nếu mạng/server lỗi. */
     fun fetch(versionCode: Int): Pair<UpdateInfo, ProductInfo> {
-        val url = URL("${BackendApi.BASE_URL}/app/config?platform=android&versionCode=$versionCode")
+        // abi: để máy chủ trả đúng file APK (arm64 / armeabi-v7a) khi có bản mới.
+        val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull().orEmpty()
+        val url = URL("${BackendApi.BASE_URL}/app/config?platform=android&versionCode=$versionCode&abi=$abi")
         val conn = (url.openConnection() as HttpURLConnection).apply {
             connectTimeout = 60_000
             readTimeout = 60_000
